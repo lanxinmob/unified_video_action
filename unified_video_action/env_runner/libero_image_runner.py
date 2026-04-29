@@ -8,6 +8,7 @@ import pathlib
 import tqdm
 import h5py
 import math
+import time
 import dill
 import time
 import wandb.sdk.data_types.video as wv
@@ -316,7 +317,7 @@ class LiberoImageRunner(BaseImageRunner):
 
             total_inf_time = 0.0
             inf_count = 0 
-
+            
             while not done:
                 # create obs dict
                 # obs = self.convert_obs(obs)
@@ -348,7 +349,7 @@ class LiberoImageRunner(BaseImageRunner):
                 np_action_dict = dict_apply(
                     action_dict, lambda x: x.detach().to("cpu").numpy()
                 )
-
+                
                 action = np_action_dict["action"]  # (1, 8, 10)
                 print(f"Inference time: {time.monotonic() - start_time:.3f} s")
                 if inf_count > 0: 
@@ -384,6 +385,7 @@ class LiberoImageRunner(BaseImageRunner):
                 avg_time = total_inf_time / (inf_count - 1)
                 print(f"\n [Speed Test] {env_name} 单次平均推理耗时: {avg_time:.3f} 秒")
 
+            
             # collect data for this round
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
             all_rewards[this_global_slice] = env.call("get_attr", "reward")[
