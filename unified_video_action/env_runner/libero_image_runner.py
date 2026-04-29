@@ -278,6 +278,7 @@ class LiberoImageRunner(BaseImageRunner):
         # allocate data
         all_video_paths = [None] * n_inits
         all_rewards = [None] * n_inits
+        all_inf_times =[]
 
         print("env_runner: ", self.language_goal)
         for chunk_idx in range(n_chunks):
@@ -354,6 +355,7 @@ class LiberoImageRunner(BaseImageRunner):
                 if inf_count > 0: 
                         total_inf_time += (time.monotonic() - start_time)
                         inf_count += 1
+                        
                 if not np.all(np.isfinite(action)):
                     print(action)
                     raise RuntimeError("Nan or Inf action")
@@ -383,7 +385,7 @@ class LiberoImageRunner(BaseImageRunner):
             if inf_count > 1:
                 avg_time = total_inf_time / (inf_count - 1)
                 print(f"\n [Speed Test] {env_name} 单次平均推理耗时: {avg_time:.3f} 秒")
-
+                all_inf_times.append(avg_time)
             # collect data for this round
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
             all_rewards[this_global_slice] = env.call("get_attr", "reward")[
@@ -422,6 +424,10 @@ class LiberoImageRunner(BaseImageRunner):
             name = prefix + "mean_score"
             value = np.mean(value)
             log_data[name] = value
+
+        if len(all_inf_times) > 0:
+            task_avg_speed = np.mean(all_inf_times)
+            log_data[f"test/{self.task_name}_inference_speed_sec"] = task_avg_speed
 
         return log_data
 
