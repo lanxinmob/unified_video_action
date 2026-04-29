@@ -336,6 +336,7 @@ class LiberoImageRunner(BaseImageRunner):
 
                 # run policy
                 with torch.no_grad():
+                    torch.cuda.synchronize()
                     start_time = time.monotonic()
                     action_dict = policy.predict_action(
                         obs_dict,
@@ -343,15 +344,16 @@ class LiberoImageRunner(BaseImageRunner):
                         * obs_dict["agentview_image"].size(0),
                         **kwargs,
                     )
-                    
-
+                    torch.cuda.synchronize()
+                    print(f"Inference time: {time.monotonic() - start_time:.3f} s")    
+                
                 # device_transfer
                 np_action_dict = dict_apply(
                     action_dict, lambda x: x.detach().to("cpu").numpy()
                 )
                 
                 action = np_action_dict["action"]  # (1, 8, 10)
-                print(f"Inference time: {time.monotonic() - start_time:.3f} s")
+            
                 if inf_count > 0: 
                         total_inf_time += (time.monotonic() - start_time)
                         inf_count += 1
