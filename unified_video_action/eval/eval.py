@@ -190,23 +190,9 @@ def test_video_fvd(
 
             if len(predictions) < n_examples:
                 reals.append(
-                    torch.cat(
-                        [
-                            x[:, :, : x.size(2) // 2],
-                            rearrange(real, "b t h w c -> b c t h w"),
-                        ],
-                        dim=2,
-                    )
-                )
+                    torch.cat([x[:, :, : x.size(2) // 2],rearrange(real, "b t h w c -> b c t h w"),],dim=2,))
                 predictions.append(
-                    torch.cat(
-                        [
-                            x[:, :, : x.size(2) // 2],
-                            rearrange(pred, "b t h w c -> b c t h w"),
-                        ],
-                        dim=2,
-                    )
-                )
+                    torch.cat([x[:, :, : x.size(2) // 2],rearrange(pred, "b t h w c -> b c t h w"),],dim=2,))
 
             if real.shape[1] < 16:
                 pred = pred.repeat_interleave(repeats=4, dim=1)
@@ -241,9 +227,7 @@ def test_video_fvd(
     )  # [4, 3, 8, 128, 128]
 
     real_video = wandb.Video(os.path.join(output_dir, f"vis/{name_label}real_{it}.gif"))
-    pred_video = wandb.Video(
-        os.path.join(output_dir, f"vis/{name_label}predicted_{it}.mp4")
-    )
+    pred_video = wandb.Video(os.path.join(output_dir, f"vis/{name_label}predicted_{it}.mp4"))
 
     log_data[f"{name_label}video_fvd"] = fvd
     log_data[f"{name_label}real_img"] = real_video

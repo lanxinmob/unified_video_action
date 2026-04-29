@@ -60,10 +60,10 @@ def main(checkpoint, output_dir, device):
             runner_log = env_runner.run(policy)
             step_log.update(runner_log)
             print(step_log)
-
+            
         assert "test_mean_score" not in step_log
         all_test_mean_score = {
-            k: v for k, v in step_log.items() if "test/" in k and "_mean_score" in k
+            k: v for k, v in step_log.items() if "test" in k and "_mean_score" in k
         }
         step_log["test_mean_score"] = np.mean(list(all_test_mean_score.values()))
 

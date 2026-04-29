@@ -96,9 +96,7 @@ class MAR(nn.Module):
 
         # wrist video frames
         if self.predict_wrist_img:
-            self.z_proj_wrist = nn.Linear(
-                self.token_embed_dim, encoder_embed_dim, bias=True
-            )
+            self.z_proj_wrist = nn.Linear(self.token_embed_dim, encoder_embed_dim, bias=True)
 
         # action
         self.predict_action = action_model_params["predict_action"]
@@ -113,15 +111,11 @@ class MAR(nn.Module):
         if self.predict_wrist_img:
             self.fake_latent_wrist_x = nn.Parameter(torch.zeros(1, encoder_embed_dim))
         if self.use_history_action:
-            self.fake_latent_history_action = nn.Parameter(
-                torch.zeros(1, encoder_embed_dim)
-            )
+            self.fake_latent_history_action = nn.Parameter(torch.zeros(1, encoder_embed_dim))
 
         # ========= History Action =========
         if self.use_history_action:
-            self.history_action_proj_cond = nn.Linear(
-                act_dim, encoder_embed_dim, bias=True
-            )
+            self.history_action_proj_cond = nn.Linear(act_dim, encoder_embed_dim, bias=True)
 
         # ========= Proprioception =========
         if self.use_proprioception:
@@ -157,9 +151,7 @@ class MAR(nn.Module):
                     512, encoder_embed_dim, bias=True
                 )  # clip text embedding is 512
                 self.buffer_size_text = 64
-                self.text_pos_embed = nn.Parameter(
-                    torch.zeros(1, self.buffer_size_text, encoder_embed_dim)
-                )
+                self.text_pos_embed = nn.Parameter(torch.zeros(1, self.buffer_size_text, encoder_embed_dim))
 
         # ========= Projection =========
         if self.predict_wrist_img:
@@ -463,9 +455,7 @@ class MAR(nn.Module):
             x = self.fake_latent_x.unsqueeze(1).expand(B, cond.size(1), -1)
 
             if self.predict_wrist_img:
-                wrist_x = self.fake_latent_wrist_x.unsqueeze(1).expand(
-                    B, cond.size(1), -1
-                )
+                wrist_x = self.fake_latent_wrist_x.unsqueeze(1).expand(B, cond.size(1), -1)
 
         elif task_mode == "inverse_model":
             x = self.z_proj(x)
@@ -483,43 +473,30 @@ class MAR(nn.Module):
 
             x = self.z_proj(x)
             x = rearrange(x, "b t s c -> b (t s) c")
-            fake_latent_expanded = self.fake_latent_x.unsqueeze(1).expand(
-                B, x.size(1), -1
-            )
+
+            fake_latent_expanded = self.fake_latent_x.unsqueeze(1).expand(B, x.size(1), -1)
             x[mask == 1] = fake_latent_expanded[mask == 1].to(x.dtype)
 
             if self.predict_wrist_img:
                 wrist_x = self.z_proj_wrist(proprioception_input["pred_second_image_z"])
                 wrist_x = rearrange(wrist_x, "b t s c -> b (t s) c")
-                fake_wrist_latent_expanded = self.fake_latent_wrist_x.unsqueeze(
-                    1
-                ).expand(B, wrist_x.size(1), -1)
-                wrist_x[mask == 1] = fake_wrist_latent_expanded[mask == 1].to(
-                    wrist_x.dtype
-                )
+                fake_wrist_latent_expanded = self.fake_latent_wrist_x.unsqueeze(1).expand(B, wrist_x.size(1), -1)
+                wrist_x[mask == 1] = fake_wrist_latent_expanded[mask == 1].to(wrist_x.dtype)
 
         embed_dim = cond.size(2)
 
         # ========= History Action =========
         if self.use_history_action:
             if history_nactions is None:
-                history_action_latents = self.fake_latent_history_action.unsqueeze(
-                    0
-                ).repeat(B, T * self.n_frames, 1)
+                history_action_latents = self.fake_latent_history_action.unsqueeze(0).repeat(B, T * self.n_frames, 1)
             else:
                 history_action_latents = self.history_action_proj_cond(history_nactions)
 
                 if self.training:
-                    history_action_mask = (
-                        torch.rand(B, T * self.n_frames) > self.action_mask_ratio
-                    ).int()
-                    history_action_latents[history_action_mask == 1] = (
-                        self.fake_latent_history_action.to(history_action_latents.dtype)
-                    )
+                    history_action_mask = (torch.rand(B, T * self.n_frames) > self.action_mask_ratio).int()
+                    history_action_latents[history_action_mask == 1] = (self.fake_latent_history_action.to(history_action_latents.dtype))
 
-            history_action_latents_expand = history_action_latents.repeat_interleave(
-                self.buffer_size_action, dim=1
-            )
+            history_action_latents_expand = history_action_latents.repeat_interleave(self.buffer_size_action, dim=1)
 
         # ========= Proprioception =========
         if self.use_proprioception:
@@ -533,21 +510,11 @@ class MAR(nn.Module):
                     ],
                     dim=-1,
                 )
-                proprioception_state_cond = self.proprioception_proj_cond(
-                    proprioception_state_cond.float()
-                )
-                proprioception_state_cond_expand = (
-                    proprioception_state_cond.repeat_interleave(
-                        self.buffer_size_properception, dim=1
-                    )
-                )
+                proprioception_state_cond = self.proprioception_proj_cond(proprioception_state_cond.float())
+                proprioception_state_cond_expand = (proprioception_state_cond.repeat_interleave(self.buffer_size_properception, dim=1))
             else:
-                proprioception_image_cond = self.proprioception_image_proj_cond(
-                    proprioception_input["second_image_z"]
-                )
-                proprioception_image_cond = rearrange(
-                    proprioception_image_cond, "b t s c -> b (t s) c"
-                )
+                proprioception_image_cond = self.proprioception_image_proj_cond(proprioception_input["second_image_z"])
+                proprioception_image_cond = rearrange(proprioception_image_cond, "b t s c -> b (t s) c")
 
                 proprioception_state_cond = torch.cat(
                     [
@@ -557,23 +524,15 @@ class MAR(nn.Module):
                     ],
                     dim=-1,
                 )
-                proprioception_state_cond = self.proprioception_proj_cond(
-                    proprioception_state_cond
-                )
-                proprioception_state_cond_expand = (
-                    proprioception_state_cond.repeat_interleave(
-                        self.buffer_size_properception, dim=1
-                    )
-                )
+                proprioception_state_cond = self.proprioception_proj_cond(proprioception_state_cond)
+                proprioception_state_cond_expand = (proprioception_state_cond.repeat_interleave(self.buffer_size_properception, dim=1))
 
         # ========= Action =========
         if task_mode == "dynamic_model":
             action_latents = self.action_proj_cond(nactions)
         else:
             action_latents = self.fake_action_latent.unsqueeze(0).repeat(B, 16, 1)
-        action_latents_expand = action_latents.repeat_interleave(
-            self.buffer_size_action, dim=1
-        )
+        action_latents_expand = action_latents.repeat_interleave(self.buffer_size_action, dim=1)
 
         # ========= Wrist Video =========
         if self.predict_wrist_img:
@@ -582,9 +541,7 @@ class MAR(nn.Module):
                 parts.append(history_action_latents_expand)
             parts.append(action_latents_expand)
             if self.use_proprioception:
-                parts.extend(
-                    [proprioception_image_cond, proprioception_state_cond_expand]
-                )
+                parts.extend([proprioception_image_cond, proprioception_state_cond_expand])
             x = torch.cat(parts, dim=-1)
         else:
             parts = [x, cond]
@@ -596,50 +553,30 @@ class MAR(nn.Module):
                 if self.task_name == "umi":
                     parts.append(proprioception_state_cond_expand)
                 else:
-                    parts.extend(
-                        [proprioception_image_cond, proprioception_state_cond_expand]
-                    )
+                    parts.extend([proprioception_image_cond, proprioception_state_cond_expand])
             x = torch.cat(parts, dim=-1)
 
         # ========= Projection =========
         x = self.proj_cond_x_layer(x)
 
         # ========= Position Embedding =========
-        temporal_pos_embed_expanded = self.temporal_pos_embed.unsqueeze(2).expand(
-            -1, -1, S, -1
-        ) 
-        spatial_pos_embed_expanded = self.spatial_pos_embed.unsqueeze(1).expand(
-            -1, T, -1, -1
-        ) 
+        temporal_pos_embed_expanded = self.temporal_pos_embed.unsqueeze(2).expand(-1, -1, S, -1) 
+        spatial_pos_embed_expanded = self.spatial_pos_embed.unsqueeze(1).expand(-1, T, -1, -1)         
 
-        combined_pos_embed = (
-            temporal_pos_embed_expanded + spatial_pos_embed_expanded
-        ).reshape(-1, T * S, embed_dim)
+        combined_pos_embed = (temporal_pos_embed_expanded + spatial_pos_embed_expanded).reshape(-1, T * S, embed_dim)
         x = x + combined_pos_embed
 
         # ========= Language Embedding =========
         if self.language_emb_model == "clip":
             if self.language_emb_model_type == 1:
-                text_latents = text_latents.unsqueeze(1).repeat(
-                    1, self.buffer_size_text, 1
-                )
+                text_latents = text_latents.unsqueeze(1).repeat(1, self.buffer_size_text, 1)
 
                 ## this is for cfg
                 if self.training:
                     drop_latent_mask = torch.rand(B) < self.label_drop_prob
-                    drop_latent_mask = (
-                        drop_latent_mask.unsqueeze(-1).to(self.device).to(x.dtype)
-                    )
-                    drop_latent_mask = drop_latent_mask.unsqueeze(1).repeat(
-                        1, self.buffer_size_text, 1
-                    )
-                    text_latents = (
-                        drop_latent_mask
-                        * self.fake_latent.unsqueeze(1).repeat(
-                            1, self.buffer_size_text, 1
-                        )
-                        + (1 - drop_latent_mask) * text_latents
-                    )
+                    drop_latent_mask = (drop_latent_mask.unsqueeze(-1).to(self.device).to(x.dtype))
+                    drop_latent_mask = drop_latent_mask.unsqueeze(1).repeat(1, self.buffer_size_text, 1)
+                    text_latents = (drop_latent_mask* self.fake_latent.unsqueeze(1).repeat( 1, self.buffer_size_text, 1)+ (1 - drop_latent_mask) * text_latents)
 
                 text_latents = text_latents + self.text_pos_embed
                 x = torch.cat([text_latents, x], dim=1)
@@ -665,26 +602,14 @@ class MAR(nn.Module):
         _, _, embed_dim = x.shape
 
         # ========= Position Embedding =========
-        decoder_temporal_pos_embed_expanded = self.decoder_temporal_pos_embed.unsqueeze(
-            2
-        ).expand(
-            -1, -1, S, -1
-        ) 
-        decoder_spatial_pos_embed_expanded = self.decoder_spatial_pos_embed.unsqueeze(
-            1
-        ).expand(
-            -1, T, -1, -1
-        ) 
-        decoder_combined_pos_embed = (
-            decoder_temporal_pos_embed_expanded + decoder_spatial_pos_embed_expanded
-        ).reshape(1, T * S, embed_dim)
+        decoder_temporal_pos_embed_expanded = self.decoder_temporal_pos_embed.unsqueeze(2).expand(-1, -1, S, -1) 
+        decoder_spatial_pos_embed_expanded = self.decoder_spatial_pos_embed.unsqueeze(1).expand(-1, T, -1, -1) 
+        decoder_combined_pos_embed = (decoder_temporal_pos_embed_expanded + decoder_spatial_pos_embed_expanded).reshape(1, T * S, embed_dim)
 
         # ========= Language Embedding =========
         if self.language_emb_model == "clip":
             if self.language_emb_model_type == 1:
-                combined_pos_embed = torch.cat(
-                    [self.decoder_text_pos_embed, decoder_combined_pos_embed], dim=1
-                )
+                combined_pos_embed = torch.cat([self.decoder_text_pos_embed, decoder_combined_pos_embed], dim=1)
             else:
                 combined_pos_embed = decoder_combined_pos_embed
         else:
@@ -707,19 +632,9 @@ class MAR(nn.Module):
                 x = x[:, self.buffer_size_text :]
 
         # ========= Diffusion Position Embedding =========
-        diffusion_temporal_pos_embed_expanded = self.diffusion_temporal_embed.unsqueeze(
-            2
-        ).expand(
-            -1, -1, S, -1
-        )
-        diffusion_spatial_pos_embed_expanded = self.diffusion_spatial_embed.unsqueeze(
-            1
-        ).expand(
-            -1, T, -1, -1
-        )
-        diffusion_combined_pos_embed = (
-            diffusion_temporal_pos_embed_expanded + diffusion_spatial_pos_embed_expanded
-        ).reshape(1, T * S, embed_dim)
+        diffusion_temporal_pos_embed_expanded = self.diffusion_temporal_embed.unsqueeze(2).expand(-1, -1, S, -1)
+        diffusion_spatial_pos_embed_expanded = self.diffusion_spatial_embed.unsqueeze(1).expand(-1, T, -1, -1)
+        diffusion_combined_pos_embed = (diffusion_temporal_pos_embed_expanded + diffusion_spatial_pos_embed_expanded).reshape(1, T * S, embed_dim)
 
         x = x + diffusion_combined_pos_embed
 
@@ -738,50 +653,32 @@ class MAR(nn.Module):
     ):
         if task_mode == "video_model" or task_mode == "dynamic_model":
             if self.predict_wrist_img:
-                video_loss = self.diffloss(
-                    z=z, target=target, mask=mask, text_latents=text_latents
-                )
-                video_loss_wrist = self.diffloss_wrist(
-                    z=z, target=gt_wrist_latents, mask=mask, text_latents=text_latents
-                )
+                video_loss = self.diffloss(z=z, target=target, mask=mask, text_latents=text_latents)
+                video_loss_wrist = self.diffloss_wrist(z=z, target=gt_wrist_latents, mask=mask, text_latents=text_latents)
                 video_loss = video_loss + video_loss_wrist
             else:
-                video_loss = self.diffloss(
-                    z=z, target=target, mask=mask, text_latents=text_latents
-                )
+                video_loss = self.diffloss(z=z, target=target, mask=mask, text_latents=text_latents)
 
             act_loss = torch.tensor(0.0).to(self.device)
             loss = video_loss
 
         elif task_mode == "policy_model" or task_mode == "inverse_model":
-            act_loss = self.diffactloss(
-                z=z, target=nactions, task_mode=task_mode, text_latents=text_latents
-            )
+            act_loss = self.diffactloss(z=z, target=nactions, task_mode=task_mode, text_latents=text_latents)
             video_loss = torch.tensor(0.0).to(self.device)
             loss = act_loss
 
         elif task_mode == "full_dynamic_model":
             if self.predict_wrist_img:
-                video_loss = self.diffloss(
-                    z=z, target=target, mask=mask, text_latents=text_latents
-                )
-                video_loss_wrist = self.diffloss_wrist(
-                    z=z, target=gt_wrist_latents, mask=mask, text_latents=text_latents
-                )
+                video_loss = self.diffloss(z=z, target=target, mask=mask, text_latents=text_latents)
+                video_loss_wrist = self.diffloss_wrist(z=z, target=gt_wrist_latents, mask=mask, text_latents=text_latents)
                 video_loss = video_loss + video_loss_wrist
             else:
-                video_loss = self.diffloss(
-                    z=z, target=target, mask=mask, text_latents=text_latents
-                )
-            act_loss = self.diffactloss(
-                z=z, target=nactions, task_mode=task_mode, text_latents=text_latents
-            )
+                video_loss = self.diffloss(z=z, target=target, mask=mask, text_latents=text_latents)
+            act_loss = self.diffactloss(z=z, target=nactions, task_mode=task_mode, text_latents=text_latents)
             loss = video_loss + act_loss
 
         if self.predict_proprioception:
-            properception_loss = self.diffproploss(
-                z=z, target=gt_properception, text_latents=text_latents
-            )
+            properception_loss = self.diffproploss(z=z, target=gt_properception, text_latents=text_latents)
             loss = loss + properception_loss
 
         return loss, video_loss, act_loss
@@ -800,48 +697,27 @@ class MAR(nn.Module):
         B, T, C, H, W = imgs.size()
 
         # ========= Patchify =========
-        imgs = rearrange(
-            imgs, "b t c h w -> (b t) c h w"
-        )
+        imgs = rearrange(imgs, "b t c h w -> (b t) c h w")
         x = self.patchify(imgs)
         x = rearrange(x, "(b t) seq_len c -> b t seq_len c", b=B)
 
         cond = rearrange(cond, "b t c h w -> (b t) c h w")
         cond = self.patchify(cond)
-        cond = rearrange(
-            cond, "(b t) seq_len c -> b t seq_len c", b=B
-        )
+        cond = rearrange(cond, "(b t) seq_len c -> b t seq_len c", b=B)
 
         # ========= Proprioception =========
         if self.use_proprioception:
             if "second_image_z" in proprioception_input:
-                proprioception_input["second_image_z"] = rearrange(
-                    proprioception_input["second_image_z"], "b t c h w -> (b t) c h w"
-                )
-                proprioception_input["second_image_z"] = self.patchify(
-                    proprioception_input["second_image_z"]
-                )
-                proprioception_input["second_image_z"] = rearrange(
-                    proprioception_input["second_image_z"],
-                    "(b t) seq_len c -> b t seq_len c",
-                    b=B,
-                )
+                proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"], "b t c h w -> (b t) c h w")
+                proprioception_input["second_image_z"] = self.patchify(proprioception_input["second_image_z"])
+                proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"],"(b t) seq_len c -> b t seq_len c",b=B,)
 
         # ========= Predicted Wrist Image =========
         if self.predict_wrist_img:
             if "pred_second_image_z" in proprioception_input:
-                proprioception_input["pred_second_image_z"] = rearrange(
-                    proprioception_input["pred_second_image_z"],
-                    "b t c h w -> (b t) c h w",
-                )
-                proprioception_input["pred_second_image_z"] = self.patchify(
-                    proprioception_input["pred_second_image_z"]
-                )
-                proprioception_input["pred_second_image_z"] = rearrange(
-                    proprioception_input["pred_second_image_z"],
-                    "(b t) seq_len c -> b t seq_len c",
-                    b=B,
-                )
+                proprioception_input["pred_second_image_z"] = rearrange(proprioception_input["pred_second_image_z"],"b t c h w -> (b t) c h w",)
+                proprioception_input["pred_second_image_z"] = self.patchify(proprioception_input["pred_second_image_z"])
+                proprioception_input["pred_second_image_z"] = rearrange(proprioception_input["pred_second_image_z"],"(b t) seq_len c -> b t seq_len c", b=B,)
 
         if text_latents is not None and hasattr(self, "text_proj_cond"):
             if self.language_emb_model_type == 1:
@@ -852,12 +728,8 @@ class MAR(nn.Module):
         # ========= Predicted Wrist Image =========
         if self.predict_wrist_img:
             if "pred_second_image_z" in proprioception_input:
-                gt_wrist_latents = (
-                    proprioception_input["pred_second_image_z"].clone().detach()
-                )
-                gt_wrist_latents = rearrange(
-                    gt_wrist_latents, "b t s c -> b (t s) c"
-                )
+                gt_wrist_latents = (proprioception_input["pred_second_image_z"].clone().detach())
+                gt_wrist_latents = rearrange(gt_wrist_latents, "b t s c -> b (t s) c")
 
         # ========= Sample Orders =========
         orders = self.sample_orders(bsz=B)
@@ -880,16 +752,12 @@ class MAR(nn.Module):
 
         # ========= Diffloss over Video and Action =========
         mask = rearrange(mask, "b t s -> b (t s)")
-        gt_latents = rearrange(
-            gt_latents, "b t s c -> b (t s) c"
-        )
+        gt_latents = rearrange(gt_latents, "b t s c -> b (t s) c")
 
         # ========= Predict Proprioception =========
         if self.predict_proprioception:
             if self.task_name == "umi":
-                gt_properception = proprioception_input[
-                    "robot0_eef_rot_axis_angle_wrt_start_pred"
-                ]
+                gt_properception = proprioception_input["robot0_eef_rot_axis_angle_wrt_start_pred"]
             elif self.task_name == "toolhang":
                 gt_properception = torch.cat([proprioception_input['robot0_eef_pos_pred'], 
                                               proprioception_input['robot0_eef_quat_pred'], 
@@ -963,24 +831,14 @@ class MAR(nn.Module):
         B, T, C, H, W = cond.size()
         cond = rearrange(cond, "b t c h w -> (b t) c h w")
         cond = self.patchify(cond)
-        cond = rearrange(
-            cond, "(b t) seq_len c -> b t seq_len c", b=B
-        )
+        cond = rearrange(cond, "(b t) seq_len c -> b t seq_len c", b=B)
 
         # ========= Proprioception =========
         if self.use_proprioception:
             if "second_image_z" in proprioception_input:
-                proprioception_input["second_image_z"] = rearrange(
-                    proprioception_input["second_image_z"], "b t c h w -> (b t) c h w"
-                )
-                proprioception_input["second_image_z"] = self.patchify(
-                    proprioception_input["second_image_z"]
-                )
-                proprioception_input["second_image_z"] = rearrange(
-                    proprioception_input["second_image_z"],
-                    "(b t) seq_len c -> b t seq_len c",
-                    b=B,
-                )
+                proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"], "b t c h w -> (b t) c h w")
+                proprioception_input["second_image_z"] = self.patchify(proprioception_input["second_image_z"])
+                proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"],"(b t) seq_len c -> b t seq_len c",b=B,)
 
         if text_latents is not None and hasattr(self, "text_proj_cond"):
             if self.language_emb_model_type == 1:
@@ -1110,9 +968,7 @@ class MAR(nn.Module):
 
                 cur_tokens = rearrange(cur_tokens, "b t s c -> b (t s) c")
                 cur_tokens[mask_to_pred.nonzero(as_tuple=True)] = sampled_token_latent
-                cur_tokens = rearrange(
-                    cur_tokens, "b (t s) c -> b t s c", t=self.n_frames
-                )
+                cur_tokens = rearrange(cur_tokens, "b (t s) c -> b t s c", t=self.n_frames)
                 tokens = cur_tokens.clone()
 
                 # ========= Predict Wrist Image =========

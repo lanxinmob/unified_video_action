@@ -144,12 +144,9 @@ class PolicyInferenceNode:
             obs_dict = dict_apply(
                 obs_dict_np, lambda x: torch.from_numpy(x).unsqueeze(0).to(self.device)
             )
-
             
             if self.cfg.name == "uva":
-                result = self.policy.predict_action(
-                    obs_dict=obs_dict, language_goal=language_goal
-                )
+                result = self.policy.predict_action(obs_dict=obs_dict, language_goal=language_goal)
 
                 past_action_list.append(np.array(result["action"][0].cpu()))
                 if len(past_action_list) > 2:

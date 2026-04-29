@@ -1,0 +1,54 @@
+flowchart TD
+  subgraph Inputs
+    A_img["Images (B,T,C,H,W)"]
+    A_act["History actions (B,L,act_dim)"]
+    A_text["Text (CLIP) / language_goal"]
+  end
+
+  subgraph VAE
+    A_img -->|AutoencoderKL.encode() sample -> z (B,T,Cz,Hz,Wz)| VAEDecode[VAE: patchify]
+    VAEDecode -->|patchify -> tokens (B,T,S,token_embed_dim)| IMG_TOK
+  end
+
+  subgraph ActionProcessing
+    A_act -->|normalize -> history_nactions (B,L,act_dim)| ACT_NORM
+    ACT_NORM -->|history_action_proj_cond (Linear) -> (B,L,embed)| ACT_PROJ
+    ACT_PROJ -->|repeat_interleave(M = buffer_size_action) -> (B, L*M,embed)| ACT_TOK
+  end
+
+  subgraph TextProcessing
+    A_text -->|CLIP -> vec (512)| TEXT_CLIP
+    TEXT_CLIP -->|text_proj_cond -> (B,embed)| TEXT_PROJ
+    TEXT_PROJ -->|repeat(buffer_size_text) -> (B,buffer_size_text,embed)| TEXT_TOK
+  end
+
+  IMG_TOK["Image tokens (B,T,S,token_embed_dim)"]
+  ACT_TOK["Action tokens (B, T*n_frames*M, encoder_embed_dim)"]
+  TEXT_TOK
+
+  %% Concatenate tokens
+  TEXT_TOK -->|concat along seq dim| CONCAT
+  IMG_TOK --> CONCAT
+  ACT_TOK --> CONCAT
+  CONCAT -->|proj_cond_x_layer (Linear) -> add pos emb| PROJ
+
+  subgraph MAR_Transformer
+    PROJ --> EncoderBlocks["Encoder Blocks (timm Block x D)"]
+    EncoderBlocks --> DecoderBlocks["Decoder Blocks (x D)"]
+    DecoderBlocks --> z_out["z (B, T*S, decoder_embed_dim)"]
+  end
+
+  %% MaskGIT style sampling loop
+  z_out -->|conditional -> Diffusion (video) / DiffAct (action)| Diff
+  Diff -->|sample() predicts token latents -> fill masked tokens| FillTokens
+  FillTokens -->|update mask (mask_by_order) and iterate num_iter times| MAR_Iter["Mask-iter num = num_iter (autoregressive)"]
+  MAR_Iter --> EncoderBlocks
+
+  %% After sampling
+  FillTokens -->|unpatchify -> images| VAE_Decode["VAE.decode -> reconstructed images"]
+  FillTokens -->|action decoder (conv_fc + DiffAct sample) -> actions (B,n_steps,act_dim)| ACTION_OUT
+
+  style Inputs fill:#eef,stroke:#333
+  style VAE fill:#efe,stroke:#333
+  style MAR_Transformer fill:#ffe,stroke:#333
+  style Diff fill:#fdd,stroke:#333

@@ -9,6 +9,7 @@ import tqdm
 import h5py
 import math
 import dill
+import time
 import wandb.sdk.data_types.video as wv
 from unified_video_action.gym_util.async_vector_env import AsyncVectorEnv
 from unified_video_action.gym_util.multistep_wrapper import MultiStepWrapper
@@ -313,6 +314,9 @@ class LiberoImageRunner(BaseImageRunner):
 
             done = False
 
+            total_inf_time = 0.0
+            inf_count = 0 
+
             while not done:
                 # create obs dict
                 # obs = self.convert_obs(obs)
@@ -331,12 +335,14 @@ class LiberoImageRunner(BaseImageRunner):
 
                 # run policy
                 with torch.no_grad():
+                    start_time = time.monotonic()
                     action_dict = policy.predict_action(
                         obs_dict,
                         language_goal=[self.language_goal]
                         * obs_dict["agentview_image"].size(0),
                         **kwargs,
                     )
+                    
 
                 # device_transfer
                 np_action_dict = dict_apply(
@@ -344,6 +350,10 @@ class LiberoImageRunner(BaseImageRunner):
                 )
 
                 action = np_action_dict["action"]  # (1, 8, 10)
+                print(f"Inference time: {time.monotonic() - start_time:.3f} s")
+                if inf_count > 0: 
+                        total_inf_time += (time.monotonic() - start_time)
+                        inf_count += 1
                 if not np.all(np.isfinite(action)):
                     print(action)
                     raise RuntimeError("Nan or Inf action")
@@ -369,6 +379,10 @@ class LiberoImageRunner(BaseImageRunner):
                 # update pbar
                 pbar.update(action.shape[1])
             pbar.close()
+
+            if inf_count > 1:
+                avg_time = total_inf_time / (inf_count - 1)
+                print(f"\n [Speed Test] {env_name} 单次平均推理耗时: {avg_time:.3f} 秒")
 
             # collect data for this round
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
