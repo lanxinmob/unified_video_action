@@ -281,5 +281,10 @@ class PushTImageRunner(BaseImageRunner):
             value = np.mean(value)
             log_data[name] = value
 
+        if len(all_inf_times) > 0:
+            task_avg_speed = np.mean(all_inf_times)
+            log_data[f"inference_speed_sec"] = task_avg_speed
+
+
         return log_data
 
