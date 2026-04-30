@@ -208,6 +208,7 @@ class PushTImageRunner(BaseImageRunner):
 
                 # run policy
                 with torch.no_grad():
+                    torch.cuda.synchronize()
                     start_time = time.monotonic()
                     action_dict = policy.predict_action(obs_dict, **kwargs)
                     torch.cuda.synchronize()
