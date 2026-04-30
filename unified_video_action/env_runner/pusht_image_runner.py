@@ -6,6 +6,7 @@ import pathlib
 import tqdm
 import dill
 import math
+import time
 import wandb.sdk.data_types.video as wv
 from unified_video_action.env.pusht.pusht_image_env import PushTImageEnv
 from unified_video_action.gym_util.async_vector_env import AsyncVectorEnv
@@ -155,6 +156,7 @@ class PushTImageRunner(BaseImageRunner):
         # allocate data
         all_video_paths = [None] * n_inits
         all_rewards = [None] * n_inits
+        all_inf_times =[]
 
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
@@ -185,6 +187,10 @@ class PushTImageRunner(BaseImageRunner):
                 mininterval=self.tqdm_interval_sec,
             )
             done = False
+
+            total_inf_time = 0.0
+            inf_count = 0 
+
             while not done:
                 # create obs dict
                 np_obs_dict = dict(obs)
@@ -202,7 +208,10 @@ class PushTImageRunner(BaseImageRunner):
 
                 # run policy
                 with torch.no_grad():
+                    start_time = time.monotonic()
                     action_dict = policy.predict_action(obs_dict, **kwargs)
+                    torch.cuda.synchronize()
+                    print(f"Inference time: {time.monotonic() - start_time:.3f} s")
 
                 # device_transfer
                 np_action_dict = dict_apply(
@@ -210,6 +219,9 @@ class PushTImageRunner(BaseImageRunner):
                 )
 
                 action = np_action_dict["action"]  # (56, 8, 2)
+                if inf_count > 0: 
+                        total_inf_time += (time.monotonic() - start_time)
+                inf_count += 1
 
                 # step env
                 obs, reward, done, info = env.step(action)
@@ -224,6 +236,11 @@ class PushTImageRunner(BaseImageRunner):
                 # update pbar
                 pbar.update(action.shape[1])
             pbar.close()
+
+            if inf_count > 1:
+                avg_time = total_inf_time / (inf_count - 1)
+                print(f"\n [Speed Test] PushtImageRunner 单次平均推理耗时: {avg_time:.3f} 秒")
+                all_inf_times.append(avg_time)
 
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
             all_rewards[this_global_slice] = env.call("get_attr", "reward")[
