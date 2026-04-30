@@ -346,8 +346,7 @@ class LiberoImageRunner(BaseImageRunner):
                         **kwargs,
                     )
                     torch.cuda.synchronize()
-                    print(f"Inference time: {time.monotonic() - start_time:.3f} s")    
-                
+                    print(f"Inference time: {time.monotonic() - start_time:.3f} s")                
                 # device_transfer
                 np_action_dict = dict_apply(
                     action_dict, lambda x: x.detach().to("cpu").numpy()
