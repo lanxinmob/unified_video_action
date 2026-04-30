@@ -357,7 +357,7 @@ class LiberoImageRunner(BaseImageRunner):
             
                 if inf_count > 0: 
                         total_inf_time += (time.monotonic() - start_time)
-                        inf_count += 1
+                inf_count += 1
                         
                 if not np.all(np.isfinite(action)):
                     print(action)
