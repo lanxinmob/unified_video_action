@@ -259,11 +259,9 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
                     ): 
                         with torch.autocast(device_type="cuda", dtype=torch.bfloat16): # You might need to change the device_type to str(device) for other versions of torch
                             raw_loss, (loss_diffusion, loss_action) = self.model(batch)
-                            print(f"当前使用的精度是: {raw_loss.dtype}")
                     else:
-                        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
                             raw_loss, (loss_diffusion, loss_action) = self.model(batch)
-                            print(f"当前使用的精度是: {raw_loss.dtype}")
 
                     accelerator.backward(raw_loss)
 
