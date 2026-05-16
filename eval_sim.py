@@ -37,8 +37,7 @@ def main(checkpoint, output_dir, device):
 
     with open_dict(cfg):
         cfg.output_dir = output_dir 
-        cfg.task.dataset.dataset_path = "/data2/local_userdata/huxianbin/libero_10/libero_10"
-        cfg.task.env_runner.n_envs = 1   
+        
     # configure workspace
     cls = hydra.utils.get_class(cfg.model._target_)
     workspace = cls(cfg, output_dir=output_dir)
@@ -53,12 +52,6 @@ def main(checkpoint, output_dir, device):
     policy.to(device)
     policy.eval()
     
-        # Hydra 格式的配置通常在 cfg.task 下
-    if "task" in cfg:
-            if "env_runner" in cfg.task:
-                print(cfg.task.env_runner)
-            else:
-                print("⚠️ 警告: cfg.task 里没有找到 'env_runner' 字段！")
     env_runners = load_env_runner(cfg, output_dir)
     
     if "libero" in cfg.task.name:
