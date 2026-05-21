@@ -17,6 +17,16 @@ combinations = [tem for tem in combinations if tem[-1] == 15]
 
 
 def resize_image(cfg, x):
+    #print("batch keys:", x.keys())
+    #print("obs keys:", x["obs"].keys())
+    obs = x["obs"].keys()
+    if "image" not in obs:
+        if "robot0_agentview_right_image" in obs:
+           x["obs"]["image"] = x["obs"]["robot0_agentview_right_image"]
+        elif "robot0_agentview_left_image" in obs:
+           x["obs"]["image"] = x["obs"]["robot0_agentview_left_image"]
+        else:
+            raise KeyError(f"No image key found. obs keys: {list(obs.keys())}")
     resize = 256
     if "libero" in cfg.task.name:
         B, T, C, H, W = x["obs"]["agentview_rgb"].shape
@@ -137,24 +147,25 @@ def decode_from_sample_autoregressive(vae_model, z):
     return pred
 
 
+
+def _sample_frame_indices(T, num_frames, select_timesteps, device):
+        start = min(select_timesteps - 1, T - 1)
+        indices = torch.linspace(start, T - 1, steps=num_frames, device=device)
+        return indices.round().long().clamp_(0, T - 1)
+
 def select_frames(x, T, eval=False, select_timesteps=4, different_history_freq=False):
     if eval:
-        indices = torch.arange(0, T, step=T // select_timesteps) + select_timesteps - 1
+        indices = _sample_frame_indices(T, select_timesteps, select_timesteps, x.device)
     else:
-        indices = (
-            torch.arange(0, T, step=T // (select_timesteps * 2)) + select_timesteps - 1
-        )
+        indices = _sample_frame_indices(
+                T, select_timesteps * 2, select_timesteps, x.device                                                            )
 
         if different_history_freq:
-            indices = torch.cat(
-                [
-                    torch.tensor(random.choice(combinations)),
-                    indices[indices.shape[0] // 2 :],
-                ]
-            )
-
+            history_indices = torch.tensor(random.choice(combinations), device=x.device)
+            history_indices = history_indices.clamp(0, T - 1)
+            indices = torch.cat(                                                                                                            [                                                                                                                history_indices,
+                 indices[indices.shape[0] // 2 :],]                                                                                  )
     x = x[:, indices, :, :, :]
-
     return x, indices
 
 

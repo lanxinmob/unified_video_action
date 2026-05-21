@@ -290,9 +290,10 @@ class LerobotCotrainingDataset(LeRobotMixtureDataset, BaseImageDataset):
             val_ratio=0.0,
             ds_weights=None,
             ds_weights_alpha=0.40,
+            language_emb_model=None,
             metadata_config: dict = {
             "percentile_mixing_method": "weighted_average",
-        } 
+        } ,**kwargs
         ):
         # exactly one of dataset_paths or dataset_soup must be defined
         assert (dataset_paths == None) + (dataset_soup == None) == 1
@@ -375,6 +376,9 @@ class LerobotCotrainingDataset(LeRobotMixtureDataset, BaseImageDataset):
         dataset, trajectory_name, step = self.sample_step(idx)
         global_ds_index = self.to_global_index(dataset, trajectory_name, step)
         return dataset.__getitem__(global_ds_index)
+
+    def get_validation_dataset(self):
+        return self
 
     def to_global_index(self, dataset, trajectory_id: int, base_index: int) -> int:
         """Convert (trajectory_id, base_index) → global index for a given dataset"""

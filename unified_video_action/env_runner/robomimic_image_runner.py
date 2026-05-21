@@ -69,6 +69,7 @@ class RobomimicImageRunner(BaseImageRunner):
         abs_action=False,
         tqdm_interval_sec=5.0,
         n_envs=None,
+        env_kwargs=None,
     ):
         super().__init__(output_dir)
 
@@ -82,6 +83,9 @@ class RobomimicImageRunner(BaseImageRunner):
 
         # read from dataset
         env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
+
+        if env_kwargs is not None:
+                env_meta["env_kwargs"].update(dict(env_kwargs))
         # disable object state observation
         env_meta["env_kwargs"]["use_object_obs"] = False
 

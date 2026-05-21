@@ -9,7 +9,7 @@ task_name: ${task.name}
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
-horizon: 10
+horizon: 17
 n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
@@ -62,7 +62,7 @@ training:
   val_every: 50
   sample_every: 5
   # steps per epoch
-  max_train_steps: null
+  max_train_steps: 500
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
@@ -73,10 +73,7 @@ logging:
   resume: True
   mode: online
   name: train_uva_robocasa_pretrain300
-  tags:
-  - train_uva_libero10
-  - libero10
-  - default
+  tags: ["${name}", "${task_name}", "${exp_name}"]
   id: null
   group: null
 

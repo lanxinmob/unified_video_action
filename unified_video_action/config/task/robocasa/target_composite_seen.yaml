@@ -81,6 +81,7 @@ dataset:
   dataset_soup: posttrain_composite_seen
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  language_emb_model: null
   pad_after: ${eval:'${n_action_steps}-1'}
   n_obs_steps: ${dataset_obs_steps}
   abs_action: *abs_action
@@ -88,4 +89,5 @@ dataset:
   use_legacy_normalizer: False
   use_cache: True
   seed: 42
+  normalizer_type: all
   val_ratio: 0.02
