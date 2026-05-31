@@ -58,12 +58,12 @@ training:
   # training loop control
   # in epochs
   rollout_every: null
-  checkpoint_every: 50
-  val_every: 50
+  checkpoint_every: 10
+  val_every: 10
   sample_every: 5
   # steps per epoch
   max_train_steps: 500
-  max_val_steps: null
+  max_val_steps: 500
   # misc
   tqdm_interval_sec: 1.0
   mixed_precision: 'fp16'
@@ -79,10 +79,10 @@ logging:
 
 checkpoint:
   topk:
-    monitor_key: test_mean_score
-    mode: max
+    monitor_key: val_action_l2_distances
+    mode: min
     k: 20
-    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+    format_str: 'epoch={epoch:04d}-test_mean_score={val_action_l2_distances:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
   

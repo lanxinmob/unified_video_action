@@ -248,12 +248,17 @@ def test_action_l2(
     plot_actions=False,
 ):
     action_l2_distances = []
-
+    
+    max_eval_steps = getattr(cfg.training, "max_val_steps", None)
+    print("max_val_steps =", max_eval_steps)
     with torch.no_grad():
         for n, batch in enumerate(loader):
             if n % 10 == 0:
                 print("test_action_l2", n, len(loader))
-
+            
+            if max_eval_steps is not None and n >= max_eval_steps:
+                break
+            
             x = batch
             x = dict_apply(x, lambda x: x.to(device, non_blocking=True))
             actions = x["action"]
