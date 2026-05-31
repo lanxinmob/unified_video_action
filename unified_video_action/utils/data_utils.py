@@ -154,6 +154,13 @@ def _sample_frame_indices(T, num_frames, select_timesteps, device):
         return indices.round().long().clamp_(0, T - 1)
 
 def select_frames(x, T, eval=False, select_timesteps=4, different_history_freq=False):
+    required_frames = select_timesteps if eval else select_timesteps * 2
+    if T < required_frames:
+        mode = "eval" if eval else "train"
+        raise ValueError(
+            f"select_frames requires at least {required_frames} frames in {mode} mode, "
+            f"but got T={T}. Increase n_obs_steps / dataset_obs_steps to at least {required_frames}."
+        )
     if eval:
         indices = _sample_frame_indices(T, select_timesteps, select_timesteps, x.device)
     else:
