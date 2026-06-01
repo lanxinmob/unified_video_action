@@ -32,6 +32,8 @@ from unified_video_action.utils.language_model import extract_text_features
 def prepare_data_predict_action(
     cfg, x, actions, model, T, device, language_goal=None, eval=False
 ):
+    text_latents = model._pop_precomputed_language_latents(x["obs"])
+
     ## normalize actions and observations
     nactions = normalize_action(
         normalizer=model.normalizer,
@@ -61,30 +63,34 @@ def prepare_data_predict_action(
         use_history_action=cfg.model.policy.use_history_action,
     )
 
-    text_latents = None
-    if cfg.task.dataset.language_emb_model is not None:
+    if text_latents is None and cfg.task.dataset.language_emb_model is not None:
         if "umi" in cfg.task.name:
             text_latents = language_goal
-        elif "libero" in cfg.task.name:
-            if cfg.task.dataset.language_emb_model == "clip":
-                text_tokens = {
-                    "input_ids": language_goal[:, 0].long()[:, 0],
-                    "attention_mask": language_goal[:, 0].long()[:, 1],
-                }
-                text_latents = extract_text_features(
-                    model.text_model,
-                    text_tokens,
-                    language_emb_model=cfg.task.dataset.language_emb_model,
-                )
-            elif cfg.task.dataset.language_emb_model == "flant5":
-                text_tokens = language_goal[:, 0].long()
-                text_latents = extract_text_features(
-                    model.text_model,
-                    text_tokens,
-                    language_emb_model=cfg.task.dataset.language_emb_model,
-                ).float()
-            else:
-                raise NotImplementedError
+        elif cfg.task.dataset.language_emb_model == "clip":
+            text_tokens = {
+                "input_ids": language_goal[:, 0].long()[:, 0],
+                "attention_mask": language_goal[:, 0].long()[:, 1],
+            }
+            text_latents = extract_text_features(
+                model.text_model,
+                text_tokens,
+                language_emb_model=cfg.task.dataset.language_emb_model,
+            )
+        elif cfg.task.dataset.language_emb_model == "flant5":
+            text_tokens = language_goal[:, 0].long()
+            text_latents = extract_text_features(
+                model.text_model,
+                text_tokens,
+                language_emb_model=cfg.task.dataset.language_emb_model,
+            ).float()
+        elif cfg.task.dataset.language_emb_model in {"robomimic", "lang_encoder"}:
+            text_latents = extract_text_features(
+                model.text_model,
+                language_goal,
+                language_emb_model=cfg.task.dataset.language_emb_model,
+            ).float()
+        else:
+            raise NotImplementedError
     return (
         x,
         real,

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 import math
 from unified_video_action.model.autoregressive.diffusion import create_diffusion
@@ -40,12 +41,34 @@ class DiffLoss(nn.Module):
         self.gen_diffusion = create_diffusion(
             timestep_respacing=num_sampling_steps, noise_schedule="cosine"
         )
+        self._warned_cond_dim_mismatch = False
+
+    def _match_condition_dim(self, z):
+        expected_dim = self.net.cond_embed.in_features
+        actual_dim = z.shape[-1]
+        if actual_dim == expected_dim:
+            return z
+
+        if not self._warned_cond_dim_mismatch:
+            print(
+                "DiffLoss condition dim mismatch: "
+                f"got {actual_dim}, expected {expected_dim}. "
+                "Applying zero-pad/truncate fallback. "
+                "Please verify model_size and pretrained checkpoint compatibility."
+            )
+            self._warned_cond_dim_mismatch = True
+
+        if actual_dim > expected_dim:
+            return z[..., :expected_dim]
+        pad_width = expected_dim - actual_dim
+        return F.pad(z, (0, pad_width))
 
     def forward(self, target, z, mask=None, conf_score=None, text_latents=None):
         # different noise over t and s
         bsz, seq_len, _ = target.shape
         target = target.reshape(bsz * seq_len, -1)
         z = z.reshape(bsz * seq_len, -1)
+        z = self._match_condition_dim(z)
         mask = mask.reshape(bsz * seq_len)
 
         t = torch.randint(
@@ -67,6 +90,7 @@ class DiffLoss(nn.Module):
 
     def sample(self, z, temperature=1.0, cfg=1.0, text_latents=None):
         # diffusion loss sampling
+        z = self._match_condition_dim(z)
         if not cfg == 1.0:
             noise = torch.randn(z.shape[0] // 2, self.in_channels).cuda()
             noise = torch.cat([noise, noise], dim=0)

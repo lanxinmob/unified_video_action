@@ -143,15 +143,18 @@ class MAR(nn.Module):
         # ========= Language Embedding =========
         self.language_emb_model = kwargs["language_emb_model"]
         self.language_emb_model_type = 1
+        self.language_latent_dim = kwargs.get("language_latent_dim", None)
+        if self.language_latent_dim is None and self.language_emb_model == "clip":
+            self.language_latent_dim = 512
+        self.use_language_tokens = self.language_latent_dim is not None
 
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
-                self.fake_latent = nn.Parameter(torch.zeros(1, encoder_embed_dim))
-                self.text_proj_cond = nn.Linear(
-                    512, encoder_embed_dim, bias=True
-                )  # clip text embedding is 512
-                self.buffer_size_text = 64
-                self.text_pos_embed = nn.Parameter(torch.zeros(1, self.buffer_size_text, encoder_embed_dim))
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            self.fake_latent = nn.Parameter(torch.zeros(1, encoder_embed_dim))
+            self.text_proj_cond = nn.Linear(
+                self.language_latent_dim, encoder_embed_dim, bias=True
+            )
+            self.buffer_size_text = 64
+            self.text_pos_embed = nn.Parameter(torch.zeros(1, self.buffer_size_text, encoder_embed_dim))
 
         # ========= Projection =========
         if self.predict_wrist_img:
@@ -218,11 +221,10 @@ class MAR(nn.Module):
         )
 
         # ========= Decoder Text Position Embedding =========
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
-                self.decoder_text_pos_embed = nn.Parameter(
-                    torch.zeros(1, self.buffer_size_text, decoder_embed_dim)
-                )
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            self.decoder_text_pos_embed = nn.Parameter(
+                torch.zeros(1, self.buffer_size_text, decoder_embed_dim)
+            )
 
         # ========= Decoder Blocks =========
         self.decoder_blocks = nn.ModuleList(
@@ -349,9 +351,8 @@ class MAR(nn.Module):
         if self.use_history_action:
             torch.nn.init.normal_(self.fake_latent_history_action, std=0.02)
 
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
-                torch.nn.init.normal_(self.fake_latent, std=0.02)
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            torch.nn.init.normal_(self.fake_latent, std=0.02)
 
         torch.nn.init.normal_(self.temporal_pos_embed, std=0.02)
         torch.nn.init.normal_(self.spatial_pos_embed, std=0.02)
@@ -362,10 +363,9 @@ class MAR(nn.Module):
         torch.nn.init.normal_(self.diffusion_temporal_embed, std=0.02)
         torch.nn.init.normal_(self.diffusion_spatial_embed, std=0.02)
 
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
-                torch.nn.init.normal_(self.text_pos_embed, std=0.02)
-                torch.nn.init.normal_(self.decoder_text_pos_embed, std=0.02)
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            torch.nn.init.normal_(self.text_pos_embed, std=0.02)
+            torch.nn.init.normal_(self.decoder_text_pos_embed, std=0.02)
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
@@ -567,8 +567,10 @@ class MAR(nn.Module):
         x = x + combined_pos_embed
 
         # ========= Language Embedding =========
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            if text_latents is None:
+                text_latents = self.fake_latent.unsqueeze(0).repeat(B, self.buffer_size_text, 1)
+            else:
                 text_latents = text_latents.unsqueeze(1).repeat(1, self.buffer_size_text, 1)
 
                 ## this is for cfg
@@ -576,10 +578,14 @@ class MAR(nn.Module):
                     drop_latent_mask = torch.rand(B) < self.label_drop_prob
                     drop_latent_mask = (drop_latent_mask.unsqueeze(-1).to(self.device).to(x.dtype))
                     drop_latent_mask = drop_latent_mask.unsqueeze(1).repeat(1, self.buffer_size_text, 1)
-                    text_latents = (drop_latent_mask* self.fake_latent.unsqueeze(1).repeat( 1, self.buffer_size_text, 1)+ (1 - drop_latent_mask) * text_latents)
+                    text_latents = (
+                        drop_latent_mask
+                        * self.fake_latent.unsqueeze(1).repeat(1, self.buffer_size_text, 1)
+                        + (1 - drop_latent_mask) * text_latents
+                    )
 
-                text_latents = text_latents + self.text_pos_embed
-                x = torch.cat([text_latents, x], dim=1)
+            text_latents = text_latents + self.text_pos_embed
+            x = torch.cat([text_latents, x], dim=1)
 
         # ========= Normalization =========
         x = self.z_proj_ln(x)
@@ -607,11 +613,8 @@ class MAR(nn.Module):
         decoder_combined_pos_embed = (decoder_temporal_pos_embed_expanded + decoder_spatial_pos_embed_expanded).reshape(1, T * S, embed_dim)
 
         # ========= Language Embedding =========
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
-                combined_pos_embed = torch.cat([self.decoder_text_pos_embed, decoder_combined_pos_embed], dim=1)
-            else:
-                combined_pos_embed = decoder_combined_pos_embed
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            combined_pos_embed = torch.cat([self.decoder_text_pos_embed, decoder_combined_pos_embed], dim=1)
         else:
             combined_pos_embed = decoder_combined_pos_embed
 
@@ -627,9 +630,8 @@ class MAR(nn.Module):
         x = self.decoder_norm(x)
 
         # ========= Language Embedding =========
-        if self.language_emb_model == "clip":
-            if self.language_emb_model_type == 1:
-                x = x[:, self.buffer_size_text :]
+        if self.use_language_tokens and self.language_emb_model_type == 1:
+            x = x[:, self.buffer_size_text :]
 
         # ========= Diffusion Position Embedding =========
         diffusion_temporal_pos_embed_expanded = self.diffusion_temporal_embed.unsqueeze(2).expand(-1, -1, S, -1)

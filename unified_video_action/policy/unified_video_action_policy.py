@@ -30,6 +30,14 @@ from unified_video_action.utils.language_model import (
 )
 
 
+def _cfg_get(container, key, default=None):
+    if container is None:
+        return default
+    if isinstance(container, dict):
+        return container.get(key, default)
+    return getattr(container, key, default)
+
+
 class UnifiedVideoActionPolicy(BaseImagePolicy):
     def __init__(
         self,
@@ -52,6 +60,24 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
         self.n_action_steps = n_action_steps
         self.shift_action = shift_action
         self.language_emb_model = language_emb_model
+        obs_shape_meta = _cfg_get(shape_meta, "obs", {})
+        self.dataset_language_key = None
+        self.language_latent_dim = None
+        for key in obs_shape_meta.keys():
+            if "lang_emb" not in key.lower():
+                continue
+            self.dataset_language_key = key
+            lang_meta = obs_shape_meta[key]
+            lang_shape = list(_cfg_get(lang_meta, "shape", []))
+            if len(lang_shape) > 0:
+                self.language_latent_dim = int(np.prod(lang_shape))
+            break
+
+        if self.language_emb_model == "clip":
+            self.language_latent_dim = 512
+        elif self.language_emb_model in {"robomimic", "lang_encoder"} and self.language_latent_dim is None:
+            self.language_latent_dim = 768
+
         self.action_dim = shape_meta.action.shape[0]
 
         self.kwargs = kwargs
@@ -73,9 +99,11 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
             task_name, language_emb_model
         )
         if self.text_model is not None:
-            self.text_model.eval()
-            for param in self.text_model.parameters():
-                param.requires_grad = False
+            if hasattr(self.text_model, "eval"):
+                self.text_model.eval()
+            if hasattr(self.text_model, "parameters"):
+                for param in self.text_model.parameters():
+                    param.requires_grad = False
 
         ## =========================== main model ===========================
         self.model = mar.__dict__[autoregressive_model_params.model_size](
@@ -106,6 +134,7 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
             predict_proprioception=kwargs["predict_proprioception"],
             task_name=self.task_name,
             language_emb_model=language_emb_model,
+            language_latent_dim=self.language_latent_dim,
             shape_meta=shape_meta,
         )
 
@@ -136,6 +165,49 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
         print("----------------------------------------------------------------------")
         print("task_modes", self.task_modes)
         print("----------------------------------------------------------------------")
+
+    def _pop_precomputed_language_latents(self, obs_dict):
+        if self.dataset_language_key is None:
+            return None
+        if self.dataset_language_key not in obs_dict:
+            return None
+
+        text_latents = obs_dict[self.dataset_language_key]
+        del obs_dict[self.dataset_language_key]
+        if text_latents.ndim >= 3:
+            text_latents = text_latents[:, 0]
+        return text_latents.float()
+
+    def _encode_language_goal(self, language_goal):
+        if language_goal is None:
+            return None
+
+        if torch.is_tensor(language_goal):
+            if language_goal.ndim >= 3:
+                language_goal = language_goal[:, 0]
+            return language_goal.float()
+
+        if self.language_emb_model == "clip":
+            text_tokens = self.tokenizer(
+                language_goal,
+                padding="max_length",
+                max_length=self.max_length,
+                return_tensors="pt",
+            ).to(self.device)
+            return extract_text_features(
+                self.text_model,
+                text_tokens,
+                language_emb_model=self.language_emb_model,
+            )
+
+        if self.language_emb_model in {"robomimic", "lang_encoder"}:
+            return extract_text_features(
+                self.text_model,
+                language_goal,
+                language_emb_model=self.language_emb_model,
+            ).float()
+
+        return None
 
     def load_pretrained_model(self):
         print("----------------------------------------------------------------------")
@@ -230,28 +302,9 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
         B, T, C, H, W = obs_dict["image"].shape
 
         ## language goal
-        text_latents = None
-        if self.language_emb_model is not None:
-            if "umi" in self.task_name:
-                text_latents = language_goal
-            else:
-                print("predict_action language_goal: ", language_goal)
-                print(self.task_name, "max_length", self.max_length)
-
-                if self.language_emb_model == "clip":
-                    text_tokens = self.tokenizer(
-                        language_goal,
-                        padding="max_length",
-                        max_length=self.max_length,
-                        return_tensors="pt",
-                    ).to(self.device)
-                    text_latents = extract_text_features(
-                        self.text_model,
-                        text_tokens,
-                        language_emb_model=self.language_emb_model,
-                    )
-                else:
-                    text_latents = None
+        text_latents = self._encode_language_goal(language_goal)
+        if text_latents is None:
+            text_latents = self._pop_precomputed_language_latents(obs_dict)
 
         ## history action
         history_nactions = None
@@ -362,8 +415,8 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
     def compute_loss(self, batch, **kwargs):
         B, T, C, H, W = batch["obs"]["image"].size()
 
-        text_latents = None
-        if self.language_emb_model == "clip":
+        text_latents = self._pop_precomputed_language_latents(batch["obs"])
+        if text_latents is None and self.language_emb_model == "clip":
             if "language" in batch["obs"]:
                 language_goal = batch["obs"]["language"]
                 del batch["obs"]["language"]
@@ -378,6 +431,15 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
                 )
             elif "language_latents" in batch:
                 text_latents = batch["language_latents"]
+            else:
+                raise NotImplementedError
+        elif text_latents is None and self.language_emb_model in {"robomimic", "lang_encoder"}:
+            if "language" in batch["obs"]:
+                language_goal = batch["obs"]["language"]
+                del batch["obs"]["language"]
+                text_latents = self._encode_language_goal(language_goal)
+            elif "language_latents" in batch:
+                text_latents = self._encode_language_goal(batch["language_latents"])
             else:
                 raise NotImplementedError
 
