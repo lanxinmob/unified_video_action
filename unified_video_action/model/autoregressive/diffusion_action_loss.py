@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 from unified_video_action.model.autoregressive.diffusion import create_diffusion
@@ -73,14 +74,14 @@ class DiffActLoss(nn.Module):
             
         elif self.act_model_type == 'conv2':
             self.conv = nn.Sequential(
-                nn.Conv1d(in_channels=1024, out_channels=256, kernel_size=7, padding=3),
+                nn.Conv1d(in_channels=z_channels, out_channels=256, kernel_size=7, padding=3),
                 nn.ReLU(),
                 nn.Conv1d(in_channels=256, out_channels=16, kernel_size=7, padding=3)
             )
         
         elif self.act_model_type == 'fc2':
             self.fc = nn.Sequential(
-                nn.Linear(1024, 256),
+                nn.Linear(z_channels, 256),
                 nn.ReLU(),  # Add an activation function (optional, but common practice)
                 nn.Linear(256, 16)
             )
@@ -105,6 +106,27 @@ class DiffActLoss(nn.Module):
         self.gen_diffusion = create_diffusion(
             timestep_respacing=act_diff_testing_steps, noise_schedule="cosine"
         )
+        self._warned_cond_dim_mismatch = False
+
+    def _match_condition_dim(self, z):
+        expected_dim = self.net.cond_embed.in_features
+        actual_dim = z.shape[-1]
+        if actual_dim == expected_dim:
+            return z
+
+        if not self._warned_cond_dim_mismatch:
+            print(
+                "DiffActLoss condition dim mismatch: "
+                f"got {actual_dim}, expected {expected_dim}. "
+                "Applying zero-pad/truncate fallback. "
+                "Please verify model_size and pretrained checkpoint compatibility."
+            )
+            self._warned_cond_dim_mismatch = True
+
+        if actual_dim > expected_dim:
+            return z[..., :expected_dim]
+        pad_width = expected_dim - actual_dim
+        return F.pad(z, (0, pad_width))
 
     def forward(self, target, z, task_mode=None, text_latents=None):
         bsz, seq_len, _ = target.shape
@@ -146,6 +168,7 @@ class DiffActLoss(nn.Module):
 
         target = target.reshape(bsz * seq_len, -1)
         z = z.reshape(bsz * seq_len, -1)
+        z = self._match_condition_dim(z)
 
         t = torch.randint(
             0,
@@ -203,6 +226,7 @@ class DiffActLoss(nn.Module):
 
         bsz, seq_len, _ = z.shape
         z = rearrange(z, "b t c -> (b t) c")
+        z = self._match_condition_dim(z)
 
 
         # diffusion loss sampling
