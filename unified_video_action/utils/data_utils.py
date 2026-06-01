@@ -385,16 +385,23 @@ def process_data(batch, task_name="", eval=False, **kwargs):
 
 def get_trajectory(nactions, T, shift_action, use_history_action=False):
     if nactions is not None:
+        # Some datasets expose fewer observation frames than action steps
+        # (e.g. Robocasa uses n_obs_steps=16 with action horizon=32). In that
+        # case, action slicing must follow the action horizon; otherwise the
+        # repeated action tokens will no longer align with the visual token grid.
+        action_T = nactions.shape[1]
+        split_T = action_T if action_T != T else T
+
         if use_history_action:
             if shift_action:
-                history_trajectory = nactions[:, : T // 2]
-                trajectory = nactions[:, T // 2 : -1]
+                history_trajectory = nactions[:, : split_T // 2]
+                trajectory = nactions[:, split_T // 2 : -1]
             else:
                 history_trajectory, trajectory = torch.chunk(nactions[:, 1:], 2, dim=1)
 
         else:
             if shift_action:
-                trajectory = nactions[:, T // 2 - 1 : -1]
+                trajectory = nactions[:, split_T // 2 - 1 : -1]
                 history_trajectory = None
             else:
                 history_trajectory, trajectory = torch.chunk(nactions, 2, dim=1)
