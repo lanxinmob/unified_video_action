@@ -30,6 +30,9 @@ if "WANDB_API_KEY" in os.environ:
     ),
 )
 def main(cfg: OmegaConf):
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+    
     OmegaConf.resolve(cfg)
 
     if cfg.model.policy.action_model_params.predict_action == False:
