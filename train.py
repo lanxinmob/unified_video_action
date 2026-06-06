@@ -22,7 +22,6 @@ import wandb
 if "WANDB_API_KEY" in os.environ:
     wandb.login(key=os.environ["WANDB_API_KEY"])
 
-
 @hydra.main(
     version_base=None,
     config_path=str(
@@ -30,9 +29,9 @@ if "WANDB_API_KEY" in os.environ:
     ),
 )
 def main(cfg: OmegaConf):
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(local_rank)
-    
+    # accelerate handles device setup and process group init;
+    # manual torch.cuda.set_device / dist.init_process_group would
+    # conflict with Accelerator() inside the workspace.
     OmegaConf.resolve(cfg)
 
     if cfg.model.policy.action_model_params.predict_action == False:
