@@ -29,9 +29,12 @@ if "WANDB_API_KEY" in os.environ:
     ),
 )
 def main(cfg: OmegaConf):
-    # accelerate handles device setup and process group init;
-    # manual torch.cuda.set_device / dist.init_process_group would
-    # conflict with Accelerator() inside the workspace.
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
+    # Bind each process to its own GPU so NCCL knows the device
+    # when Accelerator() initializes the process group later.
+    torch.cuda.set_device(local_rank)
+
     OmegaConf.resolve(cfg)
 
     if cfg.model.policy.action_model_params.predict_action == False:
