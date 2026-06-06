@@ -28,7 +28,7 @@ import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
 import gymnasium as gym
-
+from omegaconf import OmegaConf
 import robocasa
 import robocasa.utils.lerobot_utils as LU
 
