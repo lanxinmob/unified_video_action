@@ -315,7 +315,7 @@ class LerobotCotrainingDataset(LeRobotMixtureDataset, BaseImageDataset):
             
             dataset_soup_list[i]["ds_weight"] = dataset_soup_list[i].get("ds_weight", None)
 
-        device = TorchUtils.get_torch_device(try_to_use_cuda=True)
+        device = torch.device(f"cuda:{torch.cuda.current_device()}")
         language_emb_model = LangUtils.LangEncoder(device=device)
         datasets = [
             LerobotDataset(
