@@ -160,11 +160,12 @@ class RobomimicImageRunner(BaseImageRunner):
 
         # train
         #with h5py.File(dataset_path, "r") as f:
+        """
         for i in range(n_train):
             train_idx = train_start_idx + i
             enable_render = i < n_train_vis
             
-            def init_fn(env, seed=seed, enable_render=enable_render):
+            def init_fn(env, seed=train_idx, enable_render=enable_render):
                 # setup rendering
                 # video_wrapper
                 assert isinstance(env.env, VideoRecordingWrapper)
@@ -185,7 +186,7 @@ class RobomimicImageRunner(BaseImageRunner):
             env_seeds.append(train_idx)
             env_prefixs.append("train/")
             env_init_fn_dills.append(dill.dumps(init_fn))
-
+        """
         # test
         for i in range(n_test):
             seed = test_start_seed + i
