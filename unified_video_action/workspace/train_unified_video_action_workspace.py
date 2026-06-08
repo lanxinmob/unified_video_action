@@ -194,7 +194,8 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
 
         # configure env
         if (
-            cfg.model.policy.action_model_params.predict_action
+            accelerator.is_main_process
+            and cfg.model.policy.action_model_params.predict_action
             and "env_runner" in cfg.task
         ):
             env_runners = load_env_runner(cfg, self.output_dir)
@@ -207,13 +208,11 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
         # accelerator
         (
             train_dataloader,
-            val_dataloader,
             self.model,
             self.optimizer,
             self.lr_scheduler,
         ) = accelerator.prepare(
             train_dataloader,
-            val_dataloader,
             self.model,
             self.optimizer,
             self.lr_scheduler,
@@ -314,48 +313,53 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
             step_log["train_loss"] = train_loss
 
             # ========= eval for this epoch ==========
-            # policy = self.model
-            policy = accelerator.unwrap_model(self.model)
-            if cfg.training.use_ema:
-                policy = self.ema_model
-            policy.eval()
+            if accelerator.is_main_process:
+                # policy = self.model
+                policy = accelerator.unwrap_model(self.model)
+                if cfg.training.use_ema:
+                    policy = self.ema_model
+                policy.eval()
 
-            # ========= evaluate val video generation =========
-            if cfg.model.policy.autoregressive_model_params.predict_video:
-                fvd_log = test_video_fvd(
-                    cfg,
-                    policy,
-                    val_dataloader,
-                    local_epoch_idx,
-                    self.output_dir,
-                    device,
-                )
-                step_log.update(fvd_log)
+                # ========= evaluate val video generation =========
+                if cfg.model.policy.autoregressive_model_params.predict_video:
+                    fvd_log = test_video_fvd(
+                        cfg,
+                        policy,
+                        val_dataloader,
+                        local_epoch_idx,
+                        self.output_dir,
+                        device,
+                    )
+                    step_log.update(fvd_log)
 
-            # ========= evaluate val action error =========
-            if (
-                cfg.model.policy.action_model_params.predict_action
-                and "env_runner" not in cfg.task
-            ):
-                ## if has similartor, skip this
-                act_log = test_action_l2(
-                    cfg,
-                    policy,
-                    val_dataloader,
-                    local_epoch_idx,
-                    self.output_dir,
-                    device,
-                )
-                step_log.update(act_log)
+                # ========= evaluate val action error =========
+                if (
+                    cfg.model.policy.action_model_params.predict_action
+                    and "env_runner" not in cfg.task
+                ):
+                    ## if has similartor, skip this
+                    act_log = test_action_l2(
+                        cfg,
+                        policy,
+                        val_dataloader,
+                        local_epoch_idx,
+                        self.output_dir,
+                        device,
+                    )
+                    step_log.update(act_log)
 
-            # ========= simulator: run rollout =========
-            if (
-                cfg.model.policy.action_model_params.predict_action
-                and "env_runner" in cfg.task
-            ):
-                if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_rollout(cfg, env_runners, policy)
-                    step_log.update(runner_log)
+                # ========= simulator: run rollout =========
+                if (
+                    cfg.model.policy.action_model_params.predict_action
+                    and "env_runner" in cfg.task
+                ):
+                    if (self.epoch % cfg.training.rollout_every) == 0:
+                        runner_log = env_rollout(cfg, env_runners, policy)
+                        step_log.update(runner_log)
+
+                policy.train()
+
+            accelerator.wait_for_everyone()
 
             # ========= checkpoint =========
             if (
@@ -386,8 +390,6 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
                 # recover the DDP model
                 self.model = model_ddp
 
-            # ========= eval end for this epoch ==========
-            policy.train()
             accelerator.log(step_log, step=self.global_step)
             self.global_step += 1
             self.epoch += 1
