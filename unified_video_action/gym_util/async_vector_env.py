@@ -199,7 +199,7 @@ class AsyncVectorEnv(VectorEnv):
             pipe.send(("reset", None))
         self._state = AsyncState.WAITING_RESET
 
-    def reset_wait(self, timeout=None):
+    def reset_wait(self, timeout=None, **kwargs):
         """
         Parameters
         ----------
