@@ -114,34 +114,34 @@ class RobomimicImageWrapper(gym.Env):
         np.random.seed(seed=seed)
         self._seed = seed
 
+    @staticmethod
+    def _unwrap_reset(result):
+        """Gymnasium reset() returns (obs, info); handle both tuple and plain dict."""
+        if isinstance(result, tuple):
+            return result[0]
+        return result
+
     def reset(self):
         if self.init_state is not None:
             if not self.has_reset_before:
-                # the env must be fully reset at least once to ensure correct rendering
                 self.env.reset()
                 self.has_reset_before = True
-
-            # always reset to the same state
-            # to be compatible with gym
-            raw_obs = self.env.reset_to({"states": self.init_state})
+            raw_obs = self._unwrap_reset(
+                self.env.reset_to({"states": self.init_state}))
         elif self._seed is not None:
-            # reset to a specific seed
             seed = self._seed
             if seed in self.seed_state_map:
-                # env.reset is expensive, use cache
-                raw_obs = self.env.reset_to({"states": self.seed_state_map[seed]})
+                raw_obs = self._unwrap_reset(
+                    self.env.reset_to({"states": self.seed_state_map[seed]}))
             else:
-                # robosuite's initializes all use numpy global random state
                 np.random.seed(seed=seed)
-                raw_obs = self.env.reset()
+                raw_obs = self._unwrap_reset(self.env.reset())
                 state = self.env.unwrapped.sim.get_state().flatten()
                 self.seed_state_map[seed] = state
             self._seed = None
         else:
-            # random reset
-            raw_obs = self.env.reset()
+            raw_obs = self._unwrap_reset(self.env.reset())
 
-        # return obs
         obs = self.get_observation(raw_obs)
         return obs
 
