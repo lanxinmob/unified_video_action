@@ -8,6 +8,7 @@ import numpy as np
 import multiprocessing as mp
 import time
 import sys
+import traceback
 from enum import Enum
 from copy import deepcopy
 
@@ -401,11 +402,15 @@ class AsyncVectorEnv(VectorEnv):
         num_errors = self.num_envs - sum(successes)
         assert num_errors > 0
         for _ in range(num_errors):
-            index, exctype, value = self.error_queue.get()
+            error_info = self.error_queue.get()
+            index, exctype, value = error_info[:3]
+            tb_str = error_info[3] if len(error_info) > 3 else None
             logger.error(
                 "Received the following error from Worker-{0}: "
                 "{1}: {2}".format(index, exctype.__name__, value)
             )
+            if tb_str:
+                logger.error("Worker-{0} traceback:\n{1}".format(index, tb_str))
             logger.error("Shutting down Worker-{0}.".format(index))
             self.parent_pipes[index].close()
             self.parent_pipes[index] = None
@@ -616,7 +621,7 @@ def _worker(index, env_fn, pipe, parent_pipe, shared_memory, error_queue):
                     "`_check_observation_space`}.".format(command)
                 )
     except (KeyboardInterrupt, Exception):
-        error_queue.put((index,) + sys.exc_info()[:2])
+        error_queue.put((index,) + sys.exc_info()[:2] + (traceback.format_exc(),))
         pipe.send((None, False))
     finally:
         env.close()
@@ -675,7 +680,7 @@ def _worker_shared_memory(index, env_fn, pipe, parent_pipe, shared_memory, error
                     "`_check_observation_space`}.".format(command)
                 )
     except (KeyboardInterrupt, Exception):
-        error_queue.put((index,) + sys.exc_info()[:2])
+        error_queue.put((index,) + sys.exc_info()[:2] + (traceback.format_exc(),))
         pipe.send((None, False))
     finally:
         env.close()
