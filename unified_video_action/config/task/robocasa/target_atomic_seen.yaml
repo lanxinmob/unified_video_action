@@ -67,6 +67,7 @@ env_runner:
     camera_depths: false
     has_renderer: false
     has_offscreen_renderer: true
+    render_gpu_device_id: 0
     camera_names: ['robot0_agentview_left', 'robot0_agentview_right', 'robot0_eye_in_hand']
     camera_widths: 256
     camera_heights: 256
