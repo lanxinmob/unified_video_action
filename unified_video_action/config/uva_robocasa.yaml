@@ -62,8 +62,8 @@ training:
   val_every: 10
   sample_every: 5
   # steps per epoch
-  max_train_steps: 5000
-  max_val_steps: 5000
+  max_train_steps: 500
+  max_val_steps: 500
   # misc
   tqdm_interval_sec: 1.0
   mixed_precision: 'fp16'
