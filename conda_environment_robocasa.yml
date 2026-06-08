@@ -1,39 +1,48 @@
-name: uva
+name: uva_robocasa
+
 channels:
   - pytorch
   - nvidia
   - conda-forge
+
 dependencies:
   - python=3.11
-  - pip=22.1
+  - pip
   - pytorch=2.1.0
   - pytorch-cuda=12.1
   - torchvision=0.16.0
-  - scipy=1.11
-  - numba=0.60.0=py39h0320e7d_0
-  - numpy=1.26.4=py39h474f0d3_0
-  - pandas=2.1
-  - ipykernel=6.23
-  - matplotlib=3.7
-  - av=10.0
-  - pyyaml=6.0
-  - tqdm=4.65
+
+  # Match current RoboCasa requirements
+  - numpy=2.2.5
+  - numba=0.61.2
+  - scipy=1.15.3
+
+  # UVA / training stack
+  - pandas
+  - ipykernel
+  - matplotlib
+  - av
+  - pyyaml
+  - tqdm
   - zarr=2.16
   - numcodecs=0.11
   - hydra-core=1.2.0
   - dill=0.3.7
   - einops=0.6.1
   - diffusers=0.18.2
-  - gym=0.21.0
   - timm=0.9.7
-  - cython=0.29
+  - cython
   - accelerate=1.0.1
-  - boto3=1.33
-  - exiftool=12
-  - aiohttp=3.9
-  - aiofiles=23.2
-  - lz4=4.3.3
-  - deepspeed=0.16.3
+  - boto3
+  - aiohttp
+  - aiofiles
+  - lz4
+  - h5py
+  - lxml
+  - imageio
+  - pillow
+  - termcolor
+
   - pip:
       - gdown==5.2.0
       - imagecodecs==2024.12.30
@@ -43,10 +52,16 @@ dependencies:
       - pygame==2.6.1
       - pymunk==6.11.1
       - scikit-image==0.24.0
-      - scipy==1.13.1
       - shapely==2.0.7
       - tensorboard==2.19.0
       - transformers==4.28.0
       - huggingface_hub==0.25.2
       - wandb==0.18.3
-prefix: /scratch/m000073/shuang/miniforge3/envs/uva
+
+      # RoboCasa requirements
+      - mujoco==3.3.1
+      - pynput
+      - hidapi
+      - tianshou==0.4.10
+      - lerobot==0.3.3
+      - gymnasium
