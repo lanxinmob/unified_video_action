@@ -139,13 +139,16 @@ def main():
     parser.add_argument('-n', '--num_rollouts', default=50, type=int)
     parser.add_argument('-e', '--num_envs', default=5, type=int)
     parser.add_argument('-s', '--split', required=True)
+    parser.add_argument('--num_shards', default=1, type=int)
+    parser.add_argument('--shard_id', default=0, type=int)
     args = parser.parse_args()
 
     all_tasks = []
     for task_soup_i in args.task_set:
         all_tasks += TASK_SET_REGISTRY[task_soup_i]
-    all_tasks = set(all_tasks)
-    
+    all_tasks = sorted(set(all_tasks))
+    all_tasks = all_tasks[args.shard_id::args.num_shards]
+
     for task_i, task in enumerate(all_tasks):
         print(colored(f"[{task_i+1}/{len(all_tasks)}] running evals for {task}", "yellow"))
         eval_task(args.checkpoint, args.output_dir, args.device, task, args.num_rollouts, args.num_envs, args.split, overwrite=False)
