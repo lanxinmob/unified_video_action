@@ -103,11 +103,33 @@ class RobomimicImageWrapper(gym.Env):
         if raw_obs is None:
             raw_obs = self.env.get_observation()
 
-        self.render_cache = raw_obs[self.render_obs_key]
+        # Debug: print actual observation keys from robocasa env
+        if not hasattr(self, "_debug_keys_printed"):
+            print(f"[DEBUG] RoboCasa observation keys: {list(raw_obs.keys())}")
+            print(f"[DEBUG] Expected observation keys: {list(self.observation_space.keys())}")
+            self._debug_keys_printed = True
+
+        # Try to find render key with flexible matching
+        render_val = raw_obs.get(self.render_obs_key)
+        if render_val is None:
+            # robocasa may strip robot prefix from image keys
+            alt_key = self.render_obs_key.replace("robot0_", "")
+            render_val = raw_obs.get(alt_key)
+            if render_val is not None:
+                self.render_obs_key = alt_key
+        self.render_cache = render_val
 
         obs = dict()
         for key in self.observation_space.keys():
-            obs[key] = raw_obs[key]
+            val = raw_obs.get(key)
+            if val is None and key.startswith("robot0_"):
+                val = raw_obs.get(key.replace("robot0_", ""))
+            if val is None:
+                raise KeyError(
+                    f"Key {key!r} not found in observation. "
+                    f"Available keys: {list(raw_obs.keys())}"
+                )
+            obs[key] = val
         return obs
 
     def seed(self, seed=None):
