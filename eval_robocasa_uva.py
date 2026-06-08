@@ -43,6 +43,22 @@ def eval_task(checkpoint, base_output_dir, device, task, num_rollouts, num_envs,
     payload = torch.load(open(checkpoint, 'rb'), pickle_module=dill)
     cfg = payload['cfg']
     cfg = copy.deepcopy(OmegaConf.to_container(cfg))
+
+    # When training was run with ~task.env_runner, the key is absent
+    # from the checkpoint. Fall back to the default pretrain_human300
+    # env_runner config (used by all robocasa task sets).
+    if "env_runner" not in cfg.get("task", {}):
+        default_cfg = OmegaConf.load(
+            os.path.join(
+                os.path.dirname(__file__),
+                "unified_video_action/config/task/robocasa",
+                "pretrain_human300.yaml",
+            )
+        )
+        cfg["task"]["env_runner"] = OmegaConf.to_container(
+            default_cfg["env_runner"], resolve=False
+        )
+
     cfg["task"]["env_runner"]["env_kwargs"] = {
         "split": split,
         "seed": 1111111,
@@ -54,6 +70,7 @@ def eval_task(checkpoint, base_output_dir, device, task, num_rollouts, num_envs,
     cfg.task.env_runner.n_test = num_rollouts
 
     # set dataset path and horizon
+    horizon = get_task_horizon(task, split)
     cfg.task.env_runner.max_steps = int(horizon * 1.5)
     cfg.task.env_runner.n_envs = num_envs
 
