@@ -184,8 +184,7 @@ class RobomimicImageWrapper(gym.Env):
     def render(self, mode="rgb_array"):
         if self.render_cache is None:
             raise RuntimeError("Must run reset or step before render.")
-        img = np.moveaxis(self.render_cache, 0, -1)
-        img = (img * 255).astype(np.uint8)
+        img = (self.render_cache * 255).astype(np.uint8)
         return img
 
 
