@@ -103,33 +103,36 @@ class RobomimicImageWrapper(gym.Env):
         if raw_obs is None:
             raw_obs = self.env.get_observation()
 
-        # Debug: print actual observation keys from robocasa env
-        if not hasattr(self, "_debug_keys_printed"):
-            print(f"[DEBUG] RoboCasa observation keys: {list(raw_obs.keys())}")
-            print(f"[DEBUG] Expected observation keys: {list(self.observation_space.keys())}")
-            self._debug_keys_printed = True
+        # Build lerobot_key → shape_meta_key lookup once
+        if not hasattr(self, "_lerobot_to_obs_key"):
+            self._lerobot_to_obs_key = {}
+            for obs_key, cfg in self.shape_meta["obs"].items():
+                for lk in cfg.get("lerobot_keys", []):
+                    self._lerobot_to_obs_key[lk] = obs_key
+            print(f"[DEBUG] lerobot→obs mapping: {self._lerobot_to_obs_key}")
 
-        # Try to find render key with flexible matching
-        render_val = raw_obs.get(self.render_obs_key)
-        if render_val is None:
-            # robocasa may strip robot prefix from image keys
-            alt_key = self.render_obs_key.replace("robot0_", "")
-            render_val = raw_obs.get(alt_key)
-            if render_val is not None:
-                self.render_obs_key = alt_key
-        self.render_cache = render_val
+        # Resolve render_obs_key through lerobot mapping
+        mapped_render = next(
+            (k for k, v in self._lerobot_to_obs_key.items()
+             if v == self.render_obs_key),
+            self.render_obs_key,
+        )
+        self.render_cache = raw_obs.get(mapped_render, raw_obs.get(self.render_obs_key))
 
         obs = dict()
-        for key in self.observation_space.keys():
-            val = raw_obs.get(key)
-            if val is None and key.startswith("robot0_"):
-                val = raw_obs.get(key.replace("robot0_", ""))
+        for obs_key in self.observation_space.keys():
+            # Find the matching lerobot key in raw_obs
+            raw_key = next(
+                (k for k, v in self._lerobot_to_obs_key.items() if v == obs_key),
+                obs_key,
+            )
+            val = raw_obs.get(raw_key)
             if val is None:
                 raise KeyError(
-                    f"Key {key!r} not found in observation. "
-                    f"Available keys: {list(raw_obs.keys())}"
+                    f"Key {obs_key!r} (lerobot key {raw_key!r}) not found "
+                    f"in observation. Available keys: {list(raw_obs.keys())}"
                 )
-            obs[key] = val
+            obs[obs_key] = val
         return obs
 
     def seed(self, seed=None):
