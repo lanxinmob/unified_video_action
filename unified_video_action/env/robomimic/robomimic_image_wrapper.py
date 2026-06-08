@@ -134,7 +134,7 @@ class RobomimicImageWrapper(gym.Env):
                 # robosuite's initializes all use numpy global random state
                 np.random.seed(seed=seed)
                 raw_obs = self.env.reset()
-                state = self.env.env.get_state()["states"]
+                state = self.env.unwrapped.sim.get_state().flatten()
                 self.seed_state_map[seed] = state
             self._seed = None
         else:
