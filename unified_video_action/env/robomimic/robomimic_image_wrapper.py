@@ -132,6 +132,10 @@ class RobomimicImageWrapper(gym.Env):
                     f"Key {obs_key!r} (lerobot key {raw_key!r}) not found "
                     f"in observation. Available keys: {list(raw_obs.keys())}"
                 )
+            # Video observations from robocasa are (H, W, C);
+            # VAE expects (C, H, W). Transpose RGB images.
+            if obs_key.endswith("image") and val.ndim == 3:
+                val = np.ascontiguousarray(np.transpose(val, (2, 0, 1)))
             obs[obs_key] = val
         return obs
 
