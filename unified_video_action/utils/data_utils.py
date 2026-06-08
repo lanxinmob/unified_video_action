@@ -112,6 +112,14 @@ def resize_image_eval(task_name, obs_dict):
             obs_dict["image"] = obs_dict["camera0_rgb"]
             del obs_dict["camera0_rgb"]
 
+    if "image" not in obs_dict:
+        if "robot0_agentview_right_image" in obs_dict:
+            obs_dict["image"] = obs_dict["robot0_agentview_right_image"]
+        elif "robot0_agentview_left_image" in obs_dict:
+            obs_dict["image"] = obs_dict["robot0_agentview_left_image"]
+        else:
+            raise KeyError(f"No image key found. obs keys: {list(obs_dict.keys())}")
+
     B, T, C, H, W = obs_dict["image"].shape
     resize = 256
     if H != resize:

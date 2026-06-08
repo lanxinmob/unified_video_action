@@ -1,9 +1,8 @@
-from typing import List, Optional
-from matplotlib.pyplot import fill
+import json
+from typing import Optional
 import numpy as np
 import gym
 from gym import spaces
-from omegaconf import OmegaConf
 from robomimic.envs.env_robosuite import EnvRobosuite
 
 
@@ -32,25 +31,73 @@ class RobomimicImageWrapper(gym.Env):
 
         observation_space = spaces.Dict()
         for key, value in shape_meta["obs"].items():
+            if self._is_policy_only_obs(key, value):
+                continue
+
             shape = value["shape"]
             min_value, max_value = -1, 1
-            if key.endswith("image"):
+            obs_type = value.get("type", "low_dim")
+            if obs_type == "rgb" or key.endswith("image"):
                 min_value, max_value = 0, 1
-            elif key.endswith("quat"):
-                min_value, max_value = -1, 1
-            elif key.endswith("qpos"):
-                min_value, max_value = -1, 1
-            elif key.endswith("pos"):
+            elif obs_type == "low_dim" or key.endswith("quat") or key.endswith("qpos") or key.endswith("pos"):
                 # better range?
                 min_value, max_value = -1, 1
             else:
-                raise RuntimeError(f"Unsupported type {key}")
+                raise RuntimeError(f"Unsupported observation key {key} with type {obs_type}")
 
             this_space = spaces.Box(
                 low=min_value, high=max_value, shape=shape, dtype=np.float32
             )
             observation_space[key] = this_space
         self.observation_space = observation_space
+
+    @staticmethod
+    def _is_policy_only_obs(key, value):
+        key_lower = key.lower()
+        obs_type = str(value.get("type", "")).lower()
+        return "lang_emb" in key_lower or obs_type in {"language", "lang", "text"}
+
+    @staticmethod
+    def _format_language(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)):
+            return " ".join(str(x) for x in value)
+        return str(value)
+
+    def get_language_goal(self):
+        ep_meta = None
+        candidate_envs = [self.env]
+        unwrapped_env = getattr(self.env, "unwrapped", None)
+        if unwrapped_env is not None and unwrapped_env is not self.env:
+            candidate_envs.append(unwrapped_env)
+
+        for env in candidate_envs:
+            if hasattr(env, "get_ep_meta"):
+                ep_meta = env.get_ep_meta()
+                break
+
+            ep_meta = getattr(env, "ep_meta", None)
+            if ep_meta is None:
+                ep_meta = getattr(env, "_ep_meta", None)
+            if ep_meta is not None:
+                break
+
+        if isinstance(ep_meta, str):
+            try:
+                ep_meta = json.loads(ep_meta)
+            except json.JSONDecodeError:
+                return ep_meta
+
+        if not isinstance(ep_meta, dict):
+            return None
+
+        for key in ("lang", "language", "language_instruction", "instruction"):
+            if key in ep_meta:
+                return self._format_language(ep_meta[key])
+        return None
 
     def get_observation(self, raw_obs=None):
         if raw_obs is None:
