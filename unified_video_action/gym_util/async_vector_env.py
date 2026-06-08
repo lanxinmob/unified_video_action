@@ -621,7 +621,15 @@ def _worker(index, env_fn, pipe, parent_pipe, shared_memory, error_queue):
                     "`_check_observation_space`}.".format(command)
                 )
     except (KeyboardInterrupt, Exception):
-        error_queue.put((index,) + sys.exc_info()[:2] + (traceback.format_exc(),))
+        tb_str = traceback.format_exc()
+        exc_type, exc_value = sys.exc_info()[:2]
+        try:
+            import pickle
+            # round-trip test: must survive dumps+loads across processes
+            pickle.loads(pickle.dumps((exc_type, exc_value)))
+        except Exception:
+            exc_type, exc_value = RuntimeError, RuntimeError(tb_str)
+        error_queue.put((index, exc_type, exc_value, tb_str))
         pipe.send((None, False))
     finally:
         env.close()
@@ -680,7 +688,15 @@ def _worker_shared_memory(index, env_fn, pipe, parent_pipe, shared_memory, error
                     "`_check_observation_space`}.".format(command)
                 )
     except (KeyboardInterrupt, Exception):
-        error_queue.put((index,) + sys.exc_info()[:2] + (traceback.format_exc(),))
+        tb_str = traceback.format_exc()
+        exc_type, exc_value = sys.exc_info()[:2]
+        try:
+            import pickle
+            # round-trip test: must survive dumps+loads across processes
+            pickle.loads(pickle.dumps((exc_type, exc_value)))
+        except Exception:
+            exc_type, exc_value = RuntimeError, RuntimeError(tb_str)
+        error_queue.put((index, exc_type, exc_value, tb_str))
         pipe.send((None, False))
     finally:
         env.close()
