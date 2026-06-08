@@ -175,7 +175,9 @@ class RobomimicImageWrapper(gym.Env):
         return obs
 
     def step(self, action):
-        raw_obs, reward, done, info = self.env.step(action)
+        result = self.env.step(action)
+        raw_obs, reward, done = result[0], result[1], result[2]
+        info = result[-1]
         obs = self.get_observation(raw_obs)
         return obs, reward, done, info
 
