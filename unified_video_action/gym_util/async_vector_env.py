@@ -11,7 +11,7 @@ import sys
 from enum import Enum
 from copy import deepcopy
 
-from gym import logger
+from gym import logger, spaces
 from gym.vector.vector_env import VectorEnv
 from gym.error import (
     AlreadyPendingCallError,
@@ -230,9 +230,16 @@ class AsyncVectorEnv(VectorEnv):
         self._state = AsyncState.DEFAULT
 
         if not self.shared_memory:
-            self.observations = concatenate(
-                results, self.observations, self.single_observation_space
-            )
+            # gymnasium's concatenate can choke on nested gym/gymnasium
+            # space mismatches; dispatch manually for Dict spaces.
+            space = self.single_observation_space
+            if isinstance(space, spaces.Dict):
+                self.observations = {
+                    k: np.stack([r[k] for r in results], axis=0)
+                    for k in space.spaces
+                }
+            else:
+                self.observations = concatenate(results, self.observations, space)
 
         return deepcopy(self.observations) if self.copy else self.observations
 
@@ -293,9 +300,15 @@ class AsyncVectorEnv(VectorEnv):
         observations_list, rewards, dones, infos = zip(*results)
 
         if not self.shared_memory:
-            self.observations = concatenate(
-                observations_list, self.observations, self.single_observation_space
-            )
+            space = self.single_observation_space
+            if isinstance(space, spaces.Dict):
+                self.observations = {
+                    k: np.stack([obs[k] for obs in observations_list], axis=0)
+                    for k in space.spaces
+                }
+            else:
+                self.observations = concatenate(
+                    observations_list, self.observations, space)
 
         return (
             deepcopy(self.observations) if self.copy else self.observations,
