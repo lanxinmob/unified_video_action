@@ -131,6 +131,10 @@ class MAR(nn.Module):
                 self.proprioception_proj_cond = nn.Linear(
                     2, encoder_embed_dim, bias=True
                 )
+            elif "robocasa" in self.task_name:
+                self.proprioception_proj_cond = nn.Linear(
+                    8, encoder_embed_dim, bias=True
+                )
             else:
                 self.proprioception_proj_cond = nn.Linear(
                     9, encoder_embed_dim, bias=True
@@ -157,7 +161,10 @@ class MAR(nn.Module):
         if self.predict_wrist_img:
             proj_cond_x_dim_num = 4
             if self.use_proprioception:
-                proj_cond_x_dim_num += 2
+                if "robocasa" in self.task_name:
+                    proj_cond_x_dim_num += 3
+                else:
+                    proj_cond_x_dim_num += 2
             if self.use_history_action:
                 proj_cond_x_dim_num += 1
         else:
@@ -169,6 +176,8 @@ class MAR(nn.Module):
                     or "pusht" in self.task_name
                 ):
                     proj_cond_x_dim_num += 1
+                elif "robocasa" in self.task_name:
+                    proj_cond_x_dim_num += 3
                 else:
                     proj_cond_x_dim_num += 2
             if self.use_history_action:
@@ -334,6 +343,21 @@ class MAR(nn.Module):
                         language_emb_model=self.language_emb_model,
                         language_emb_model_type=self.language_emb_model_type,
                     )
+            elif "robocasa" in self.task_name:
+                self.diffproploss = DiffActLoss(
+                    target_channels=8,
+                    z_channels=decoder_embed_dim,
+                    width=diffloss_act_w,
+                    depth=diffloss_act_d,
+                    num_sampling_steps=num_sampling_steps,
+                    grad_checkpointing=grad_checkpointing,
+                    n_frames=self.n_frames,
+                    act_model_type=action_model_params["act_model_type"],
+                    act_diff_training_steps=act_diff_training_steps,
+                    act_diff_testing_steps=act_diff_testing_steps,
+                    language_emb_model=self.language_emb_model,
+                    language_emb_model_type=self.language_emb_model_type,
+                )
             else:
                 raise NotImplementedError
             
@@ -516,14 +540,27 @@ class MAR(nn.Module):
                 proprioception_image_cond = self.proprioception_image_proj_cond(proprioception_input["second_image_z"])
                 proprioception_image_cond = rearrange(proprioception_image_cond, "b t s c -> b (t s) c")
 
-                proprioception_state_cond = torch.cat(
-                    [
-                        proprioception_input["robot0_eef_pos"],
-                        proprioception_input["robot0_eef_quat"],
-                        proprioception_input["robot0_gripper_qpos"],
-                    ],
-                    dim=-1,
-                )
+                if "robocasa" in self.task_name:
+                    proprioception_third_image_cond = self.proprioception_image_proj_cond(proprioception_input["third_image_z"])
+                    proprioception_third_image_cond = rearrange(proprioception_third_image_cond, "b t s c -> b (t s) c")
+
+                    proprioception_state_cond = torch.cat(
+                        [
+                            proprioception_input["robot0_eef_pos"],
+                            proprioception_input["robot0_eef_ori"],
+                            proprioception_input["robot0_gripper_states"],
+                        ],
+                        dim=-1,
+                    )
+                else:
+                    proprioception_state_cond = torch.cat(
+                        [
+                            proprioception_input["robot0_eef_pos"],
+                            proprioception_input["robot0_eef_quat"],
+                            proprioception_input["robot0_gripper_qpos"],
+                        ],
+                        dim=-1,
+                    )
                 proprioception_state_cond = self.proprioception_proj_cond(proprioception_state_cond)
                 proprioception_state_cond_expand = (proprioception_state_cond.repeat_interleave(self.buffer_size_properception, dim=1))
 
@@ -541,7 +578,16 @@ class MAR(nn.Module):
                 parts.append(history_action_latents_expand)
             parts.append(action_latents_expand)
             if self.use_proprioception:
-                parts.extend([proprioception_image_cond, proprioception_state_cond_expand])
+                if "robocasa" in self.task_name:
+                    parts.extend(
+                        [
+                            proprioception_image_cond,
+                            proprioception_third_image_cond,
+                            proprioception_state_cond_expand,
+                        ]
+                    )
+                else:
+                    parts.extend([proprioception_image_cond, proprioception_state_cond_expand])
             x = torch.cat(parts, dim=-1)
         else:
             parts = [x, cond]
@@ -552,6 +598,14 @@ class MAR(nn.Module):
             if self.use_proprioception:
                 if self.task_name == "umi":
                     parts.append(proprioception_state_cond_expand)
+                elif "robocasa" in self.task_name:
+                    parts.extend(
+                        [
+                            proprioception_image_cond,
+                            proprioception_third_image_cond,
+                            proprioception_state_cond_expand,
+                        ]
+                    )
                 else:
                     parts.extend([proprioception_image_cond, proprioception_state_cond_expand])
             x = torch.cat(parts, dim=-1)
@@ -711,6 +765,10 @@ class MAR(nn.Module):
                 proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"], "b t c h w -> (b t) c h w")
                 proprioception_input["second_image_z"] = self.patchify(proprioception_input["second_image_z"])
                 proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"],"(b t) seq_len c -> b t seq_len c",b=B,)
+            if "third_image_z" in proprioception_input:
+                proprioception_input["third_image_z"] = rearrange(proprioception_input["third_image_z"], "b t c h w -> (b t) c h w")
+                proprioception_input["third_image_z"] = self.patchify(proprioception_input["third_image_z"])
+                proprioception_input["third_image_z"] = rearrange(proprioception_input["third_image_z"],"(b t) seq_len c -> b t seq_len c",b=B,)
 
         # ========= Predicted Wrist Image =========
         if self.predict_wrist_img:
@@ -763,6 +821,15 @@ class MAR(nn.Module):
                                               proprioception_input['robot0_eef_quat_pred'], 
                                               proprioception_input['robot0_gripper_qpos_pred']], 
                                              dim=-1)
+            elif "robocasa" in self.task_name:
+                gt_properception = torch.cat(
+                    [
+                        proprioception_input["robot0_eef_pos_pred"],
+                        proprioception_input["robot0_eef_ori_pred"],
+                        proprioception_input["robot0_gripper_states_pred"],
+                    ],
+                    dim=-1,
+                )
             else:
                 raise NotImplementedError
 
@@ -839,6 +906,10 @@ class MAR(nn.Module):
                 proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"], "b t c h w -> (b t) c h w")
                 proprioception_input["second_image_z"] = self.patchify(proprioception_input["second_image_z"])
                 proprioception_input["second_image_z"] = rearrange(proprioception_input["second_image_z"],"(b t) seq_len c -> b t seq_len c",b=B,)
+            if "third_image_z" in proprioception_input:
+                proprioception_input["third_image_z"] = rearrange(proprioception_input["third_image_z"], "b t c h w -> (b t) c h w")
+                proprioception_input["third_image_z"] = self.patchify(proprioception_input["third_image_z"])
+                proprioception_input["third_image_z"] = rearrange(proprioception_input["third_image_z"],"(b t) seq_len c -> b t seq_len c",b=B,)
 
         if text_latents is not None and hasattr(self, "text_proj_cond"):
             if self.language_emb_model_type == 1:

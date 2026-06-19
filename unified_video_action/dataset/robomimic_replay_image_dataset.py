@@ -33,6 +33,14 @@ from unified_video_action.common.normalize_util import (
 register_codecs()
 
 
+def _demo_sort_key(key):
+    if key.startswith("demo_"):
+        suffix = key.split("_")[-1]
+        if suffix.isdigit():
+            return (0, int(suffix))
+    return (1, key)
+
+
 class RobomimicReplayImageDataset(BaseImageDataset):
     def __init__(
         self,
@@ -186,7 +194,12 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             elif key.endswith("quat"):
                 # quaternion is in [-1,1] already
                 this_normalizer = get_identity_normalizer_from_stat(stat)
-            elif key.endswith("qpos"):
+            elif (
+                key.endswith("qpos")
+                or key.endswith("ori")
+                or key.endswith("states")
+                or key.endswith("width")
+            ):
                 this_normalizer = get_range_normalizer_from_stat(stat)
             else:
                 raise RuntimeError("unsupported")
@@ -293,10 +306,16 @@ def _convert_robomimic_to_replay(
     with h5py.File(dataset_path) as file:
         # count total steps
         demos = file["data"]
+        demo_keys = sorted(
+            [key for key in demos.keys() if "actions" in demos[key]],
+            key=_demo_sort_key,
+        )
+        if len(demo_keys) == 0:
+            raise RuntimeError(f"No demos with actions found in {dataset_path}")
         episode_ends = list()
         prev_end = 0
-        for i in range(len(demos)):
-            demo = demos[f"demo_{i}"]
+        for demo_key in demo_keys:
+            demo = demos[demo_key]
             episode_length = demo["actions"].shape[0]
             episode_end = prev_end + episode_length
             prev_end = episode_end
@@ -317,8 +336,8 @@ def _convert_robomimic_to_replay(
             if key == "action":
                 data_key = "actions"
             this_data = list()
-            for i in range(len(demos)):
-                demo = demos[f"demo_{i}"]
+            for demo_key in demo_keys:
+                demo = demos[demo_key]
                 this_data.append(demo[data_key][:].astype(np.float32))
             this_data = np.concatenate(this_data, axis=0)
             if key == "action":
@@ -372,8 +391,8 @@ def _convert_robomimic_to_replay(
                         compressor=this_compressor,
                         dtype=np.uint8,
                     )
-                    for episode_idx in range(len(demos)):
-                        demo = demos[f"demo_{episode_idx}"]
+                    for episode_idx, demo_key in enumerate(demo_keys):
+                        demo = demos[demo_key]
                         hdf5_arr = demo["obs"][key]
                         for hdf5_idx in range(hdf5_arr.shape[0]):
                             if len(futures) >= max_inflight_tasks:

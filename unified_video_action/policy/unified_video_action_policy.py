@@ -277,11 +277,16 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
         )
 
         if self.use_proprioception:
-            if "second_image" in proprioception_input:
+            if "second_image" in proprioception_input and proprioception_input["second_image"] is not None:
                 second_image_z, _ = extract_latent_autoregressive(
                     self.vae_model, proprioception_input["second_image"]
                 )
                 proprioception_input["second_image_z"] = second_image_z
+            if "third_image" in proprioception_input and proprioception_input["third_image"] is not None:
+                third_image_z, _ = extract_latent_autoregressive(
+                    self.vae_model, proprioception_input["third_image"]
+                )
+                proprioception_input["third_image_z"] = third_image_z
 
         c, latent_size = extract_latent_autoregressive(self.vae_model, c.detach())
 

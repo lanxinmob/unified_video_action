@@ -1,0 +1,54 @@
+name: robocasa
+task_type: single_dataset
+task_modes: []
+
+shape_meta: &shape_meta
+  image_resolution: 224
+  action:
+    shape:
+    - 12
+  obs:
+    ee_pos:
+      shape:
+      - 3
+    ee_ori:
+      shape:
+      - 3
+    gripper_states:
+      shape:
+      - 2
+    robot0_agentview_left_rgb:
+      shape:
+      - 3
+      - 224
+      - 224
+      type: rgb
+    robot0_agentview_right_rgb:
+      shape:
+      - 3
+      - 224
+      - 224
+      type: rgb
+    robot0_eye_in_hand_rgb:
+      shape:
+      - 3
+      - 224
+      - 224
+      type: rgb
+
+dataset:
+  _target_: unified_video_action.dataset.robomimic_replay_image_dataset.RobomimicReplayImageDataset
+  shape_meta: *shape_meta
+  language_emb_model: null
+  abs_action: false
+  dataset_path: data/robocasa/demo.hdf5
+  horizon: 32
+  n_obs_steps: 16
+  pad_after: 7
+  pad_before: 1
+  rotation_rep: rotation_6d
+  seed: 42
+  use_cache: true
+  val_ratio: 0.02
+  data_aug: false
+  normalizer_type: all

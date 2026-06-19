@@ -69,6 +69,49 @@ def resize_image(cfg, x):
         x["obs"]["wrist_image"] = resized_tensor.view(B, T, C, resize, resize)
         del x["obs"]["robot0_eye_in_hand_image"]
 
+    elif "robocasa" in cfg.task.name:
+        B, T, C, H, W = x["obs"]["robot0_agentview_left_rgb"].shape
+        resized_tensor = F.interpolate(
+            x["obs"]["robot0_agentview_left_rgb"]
+            .contiguous()
+            .float()
+            .view(B * T, C, H, W),
+            size=(resize, resize),
+            mode="bilinear",
+            align_corners=False,
+        )
+        x["obs"]["image"] = resized_tensor.view(B, T, C, resize, resize)
+
+        resized_tensor = F.interpolate(
+            x["obs"]["robot0_eye_in_hand_rgb"]
+            .contiguous()
+            .float()
+            .view(B * T, C, H, W),
+            size=(resize, resize),
+            mode="bilinear",
+            align_corners=False,
+        )
+        x["obs"]["wrist_image"] = resized_tensor.view(B, T, C, resize, resize)
+
+        resized_tensor = F.interpolate(
+            x["obs"]["robot0_agentview_right_rgb"]
+            .contiguous()
+            .float()
+            .view(B * T, C, H, W),
+            size=(resize, resize),
+            mode="bilinear",
+            align_corners=False,
+        )
+        x["obs"]["right_image"] = resized_tensor.view(B, T, C, resize, resize)
+
+        for key in (
+            "robot0_agentview_left_rgb",
+            "robot0_agentview_right_rgb",
+            "robot0_eye_in_hand_rgb",
+        ):
+            if key in x["obs"]:
+                del x["obs"][key]
+
     else:
         B, T, C, H, W = x["obs"]["image"].shape
         if resize != H:
@@ -102,6 +145,19 @@ def resize_image_eval(task_name, obs_dict):
             obs_dict["image"] = obs_dict["camera0_rgb"]
             del obs_dict["camera0_rgb"]
 
+    elif "robocasa" in task_name:
+        obs_dict["image"] = obs_dict["robot0_agentview_left_rgb"]
+        obs_dict["wrist_image"] = obs_dict["robot0_eye_in_hand_rgb"]
+        obs_dict["right_image"] = obs_dict["robot0_agentview_right_rgb"]
+
+        for key in (
+            "robot0_agentview_left_rgb",
+            "robot0_agentview_right_rgb",
+            "robot0_eye_in_hand_rgb",
+        ):
+            if key in obs_dict:
+                del obs_dict[key]
+
     B, T, C, H, W = obs_dict["image"].shape
     resize = 256
     if H != resize:
@@ -121,6 +177,15 @@ def resize_image_eval(task_name, obs_dict):
                 align_corners=False,
             )
             obs_dict["wrist_image"] = resized_tensor.view(B, T, C, resize, resize)
+
+        if "right_image" in obs_dict:
+            resized_tensor = F.interpolate(
+                obs_dict["right_image"].view(B * T, C, H, W),
+                size=(resize, resize),
+                mode="bilinear",
+                align_corners=False,
+            )
+            obs_dict["right_image"] = resized_tensor.view(B, T, C, resize, resize)
 
     return obs_dict
 
@@ -279,6 +344,68 @@ def process_data(batch, task_name="", eval=False, **kwargs):
                 "robot0_gripper_qpos_pred": robot0_gripper_qpos_pred,
             }
 
+        elif "robocasa" in task_name:
+            wrist_image = batch["obs"]["wrist_image"]
+            wrist_image = wrist_image * 255.0
+            wrist_image = wrist_image[:, indices, :, :, :]
+            wrist_image = wrist_image.to(device)
+            wrist_image = rearrange(wrist_image / 127.5 - 1, "b t c h w -> b c t h w")
+
+            right_image = batch["obs"]["right_image"]
+            right_image = right_image * 255.0
+            right_image = right_image[:, indices, :, :, :]
+            right_image = right_image.to(device)
+            right_image = rearrange(right_image / 127.5 - 1, "b t c h w -> b c t h w")
+
+            if train:
+                wrist_image, wrist_image_2 = torch.chunk(wrist_image, 2, dim=2)
+                right_image, _ = torch.chunk(right_image, 2, dim=2)
+                robot0_eef_pos, robot0_eef_pos_pred = torch.chunk(
+                    batch["obs"]["ee_pos"], 2, dim=1
+                )
+                robot0_eef_ori, robot0_eef_ori_pred = torch.chunk(
+                    batch["obs"]["ee_ori"], 2, dim=1
+                )
+                robot0_gripper_states, robot0_gripper_states_pred = torch.chunk(
+                    batch["obs"]["gripper_states"], 2, dim=1
+                )
+            else:
+                wrist_image = wrist_image
+                wrist_image_2 = None
+                right_image = right_image
+                robot0_eef_pos = batch["obs"]["ee_pos"]
+                robot0_eef_ori = batch["obs"]["ee_ori"]
+                robot0_gripper_states = batch["obs"]["gripper_states"]
+                robot0_eef_pos_pred = None
+                robot0_eef_ori_pred = None
+                robot0_gripper_states_pred = None
+
+            if kwargs["different_history_freq"]:
+                if train:
+                    robot0_eef_pos = robot0_eef_pos[:, indices[: indices.shape[0] // 2]]
+                    robot0_eef_ori = robot0_eef_ori[
+                        :, indices[: indices.shape[0] // 2]
+                    ]
+                    robot0_gripper_states = robot0_gripper_states[
+                        :, indices[: indices.shape[0] // 2]
+                    ]
+                else:
+                    robot0_eef_pos = robot0_eef_pos[:, indices]
+                    robot0_eef_ori = robot0_eef_ori[:, indices]
+                    robot0_gripper_states = robot0_gripper_states[:, indices]
+
+            proprioception_input = {
+                "robot0_eef_pos": robot0_eef_pos,
+                "robot0_eef_ori": robot0_eef_ori,
+                "robot0_gripper_states": robot0_gripper_states,
+                "second_image": wrist_image,
+                "third_image": right_image,
+                "pred_second_image": wrist_image_2,
+                "robot0_eef_pos_pred": robot0_eef_pos_pred,
+                "robot0_eef_ori_pred": robot0_eef_ori_pred,
+                "robot0_gripper_states_pred": robot0_gripper_states_pred,
+            }
+
         elif "pusht" in task_name:
             if train:
                 state, state_pred = torch.chunk(batch["obs"]["agent_pos"], 2, dim=1)
@@ -405,16 +532,21 @@ def get_vae_latent(x, vae_model, eval=False, proprioception_input={}):
     c, x = torch.chunk(x, 2, dim=2)  # take the first half as condition
 
     if proprioception_input is not None:
-        if "second_image" in proprioception_input:
+        if "second_image" in proprioception_input and proprioception_input["second_image"] is not None:
             second_image_z, _ = extract_latent_autoregressive(
                 vae_model, proprioception_input["second_image"]
             )
             proprioception_input["second_image_z"] = second_image_z
-        if "pred_second_image" in proprioception_input:
+        if "pred_second_image" in proprioception_input and proprioception_input["pred_second_image"] is not None:
             pred_second_image_z, _ = extract_latent_autoregressive(
                 vae_model, proprioception_input["pred_second_image"]
             )
             proprioception_input["pred_second_image_z"] = pred_second_image_z
+        if "third_image" in proprioception_input and proprioception_input["third_image"] is not None:
+            third_image_z, _ = extract_latent_autoregressive(
+                vae_model, proprioception_input["third_image"]
+            )
+            proprioception_input["third_image_z"] = third_image_z
 
     with torch.no_grad():
         if train:
