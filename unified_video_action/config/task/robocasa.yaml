@@ -49,6 +49,7 @@ dataset:
   rotation_rep: rotation_6d
   seed: 42
   use_cache: true
+  recursive_hdf5: true
   val_ratio: 0.02
   data_aug: false
   normalizer_type: all

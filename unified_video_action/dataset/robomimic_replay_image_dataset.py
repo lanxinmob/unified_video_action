@@ -7,6 +7,7 @@ import zarr
 import os
 import shutil
 import copy
+import glob
 from filelock import FileLock
 from threadpoolctl import threadpool_limits
 import concurrent.futures
@@ -41,6 +42,40 @@ def _demo_sort_key(key):
     return (1, key)
 
 
+def _get_cache_zarr_path(dataset_path, recursive_hdf5):
+    if recursive_hdf5:
+        return os.path.normpath(dataset_path) + ".zarr.zip"
+    return dataset_path + ".zarr.zip"
+
+
+def _remove_if_exists(path):
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def _get_hdf5_paths(dataset_path, recursive_hdf5):
+    if recursive_hdf5 and os.path.isdir(dataset_path):
+        hdf5_paths = sorted(
+            glob.glob(os.path.join(dataset_path, "**", "*.hdf5"), recursive=True)
+        )
+        hdf5_paths += sorted(
+            glob.glob(os.path.join(dataset_path, "**", "*.h5"), recursive=True)
+        )
+    elif os.path.isdir(dataset_path):
+        raise IsADirectoryError(
+            f"{dataset_path} is a directory. Set recursive_hdf5=True for RoboCasa-style "
+            "directory datasets, or pass a single HDF5 file."
+        )
+    else:
+        hdf5_paths = [dataset_path]
+
+    if len(hdf5_paths) == 0:
+        raise RuntimeError(f"No HDF5 files found under {dataset_path}")
+    return hdf5_paths
+
+
 class RobomimicReplayImageDataset(BaseImageDataset):
     def __init__(
         self,
@@ -59,6 +94,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         language_emb_model=None,
         data_aug=False,
         normalizer_type=None,
+        recursive_hdf5=False,
     ):
 
         rotation_transformer = RotationTransformer(
@@ -67,7 +103,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
 
         replay_buffer = None
         if use_cache:
-            cache_zarr_path = dataset_path + ".zarr.zip"
+            cache_zarr_path = _get_cache_zarr_path(dataset_path, recursive_hdf5)
             cache_lock_path = cache_zarr_path + ".lock"
             print("Acquiring lock on cache.")
             print("Cache path:", cache_zarr_path)
@@ -83,12 +119,13 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                             dataset_path=dataset_path,
                             abs_action=abs_action,
                             rotation_transformer=rotation_transformer,
+                            recursive_hdf5=recursive_hdf5,
                         )
                         print("Saving cache to disk.")
                         with zarr.ZipStore(cache_zarr_path) as zip_store:
                             replay_buffer.save_to_store(store=zip_store)
                     except Exception as e:
-                        shutil.rmtree(cache_zarr_path)
+                        _remove_if_exists(cache_zarr_path)
                         raise e
                 else:
                     print("Loading cached ReplayBuffer from Disk.")
@@ -104,6 +141,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                 dataset_path=dataset_path,
                 abs_action=abs_action,
                 rotation_transformer=rotation_transformer,
+                recursive_hdf5=recursive_hdf5,
             )
 
         rgb_keys = list()
@@ -280,6 +318,7 @@ def _convert_robomimic_to_replay(
     rotation_transformer,
     n_workers=None,
     max_inflight_tasks=None,
+    recursive_hdf5=False,
 ):
     if n_workers is None:
         n_workers = multiprocessing.cpu_count()
@@ -303,19 +342,28 @@ def _convert_robomimic_to_replay(
     data_group = root.require_group("data", overwrite=True)
     meta_group = root.require_group("meta", overwrite=True)
 
-    with h5py.File(dataset_path) as file:
+    hdf5_paths = _get_hdf5_paths(dataset_path, recursive_hdf5)
+    file_handles = []
+    demos_all = []
+    try:
+        for hdf5_path in hdf5_paths:
+            print(f"Loading {hdf5_path}")
+            file = h5py.File(hdf5_path, "r")
+            file_handles.append(file)
+            demos = file["data"]
+            demo_keys = sorted(
+                [key for key in demos.keys() if "actions" in demos[key]],
+                key=_demo_sort_key,
+            )
+            for demo_key in demo_keys:
+                demos_all.append((hdf5_path, demos[demo_key]))
+
         # count total steps
-        demos = file["data"]
-        demo_keys = sorted(
-            [key for key in demos.keys() if "actions" in demos[key]],
-            key=_demo_sort_key,
-        )
-        if len(demo_keys) == 0:
+        if len(demos_all) == 0:
             raise RuntimeError(f"No demos with actions found in {dataset_path}")
         episode_ends = list()
         prev_end = 0
-        for demo_key in demo_keys:
-            demo = demos[demo_key]
+        for _, demo in demos_all:
             episode_length = demo["actions"].shape[0]
             episode_end = prev_end + episode_length
             prev_end = episode_end
@@ -336,8 +384,7 @@ def _convert_robomimic_to_replay(
             if key == "action":
                 data_key = "actions"
             this_data = list()
-            for demo_key in demo_keys:
-                demo = demos[demo_key]
+            for _, demo in demos_all:
                 this_data.append(demo[data_key][:].astype(np.float32))
             this_data = np.concatenate(this_data, axis=0)
             if key == "action":
@@ -381,8 +428,13 @@ def _convert_robomimic_to_replay(
                 futures = set()
                 for key in rgb_keys:
                     data_key = "obs/" + key
-                    shape = tuple(shape_meta["obs"][key]["shape"])
-                    c, h, w = shape
+                    meta_c = tuple(shape_meta["obs"][key]["shape"])[0]
+                    first_arr = demos_all[0][1][data_key]
+                    h, w, c = first_arr.shape[1:]
+                    assert c == meta_c, (
+                        f"Image channel mismatch for {key}: HDF5 has {c}, "
+                        f"shape_meta has {meta_c}"
+                    )
                     this_compressor = Jpeg2k(level=50)
                     img_arr = data_group.require_dataset(
                         name=key,
@@ -391,9 +443,12 @@ def _convert_robomimic_to_replay(
                         compressor=this_compressor,
                         dtype=np.uint8,
                     )
-                    for episode_idx, demo_key in enumerate(demo_keys):
-                        demo = demos[demo_key]
+                    for episode_idx, (_, demo) in enumerate(demos_all):
                         hdf5_arr = demo["obs"][key]
+                        assert hdf5_arr.shape[1:] == (h, w, c), (
+                            f"Image shape mismatch for {key}: expected {(h, w, c)}, "
+                            f"got {hdf5_arr.shape[1:]}"
+                        )
                         for hdf5_idx in range(hdf5_arr.shape[0]):
                             if len(futures) >= max_inflight_tasks:
                                 # limit number of inflight tasks
@@ -417,6 +472,9 @@ def _convert_robomimic_to_replay(
                     if not f.result():
                         raise RuntimeError("Failed to encode image!")
                 pbar.update(len(completed))
+    finally:
+        for file in file_handles:
+            file.close()
 
     replay_buffer = ReplayBuffer(root)
     return replay_buffer
