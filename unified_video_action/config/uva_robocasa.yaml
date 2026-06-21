@@ -39,13 +39,13 @@ training:
   mixed_precision: 'fp16'
 
 checkpoint:
-  save_last_ckpt: true
-  save_last_snapshot: false
   topk:
-    monitor_key: video_fvd
-    format_str: epoch={epoch:04d}-video_fvd={video_fvd:.3f}.ckpt
-    k: 1
-    mode: min
+    monitor_key: test_mean_score
+    mode: max
+    k: 5
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
 
 ema:
   _target_: unified_video_action.model.autoregressive.ema_model.EMAModel

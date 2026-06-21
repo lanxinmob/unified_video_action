@@ -43,7 +43,7 @@ dataset:
   abs_action: false
   dataset_path: data/robocasa/demo.hdf5
   horizon: 32
-  n_obs_steps: 16
+  n_obs_steps: null
   pad_after: 7
   pad_before: 1
   rotation_rep: rotation_6d
@@ -53,3 +53,44 @@ dataset:
   val_ratio: 0.02
   data_aug: false
   normalizer_type: all
+
+  
+env_runner:
+  _target_: env_runner.robomimic_image_runner.RobomimicImageRunner
+  dataset_path: demo.hdf5
+  shape_meta: *shape_meta
+  # costs 1GB per env
+  n_train: 0
+  n_train_vis: 1
+  train_start_idx: 0
+  n_test: 50
+  n_test_vis: 4
+  test_start_seed: 100000
+  max_steps: 600
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  render_obs_key: 'robot0_agentview_right_image'
+  fps: 10
+  crf: 22
+  past_action: ${past_action_visible}
+  abs_action: *abs_action
+  tqdm_interval_sec: 1.0
+  n_envs: 1
+  env_kwargs:
+    seed: 1111111
+    obj_instance_split: 'test'
+    style_ids: -2
+    layout_ids: -2
+    layout_and_style_ids: null
+    clutter_mode: 0
+
+    use_camera_obs: true
+    use_object_obs: true
+    camera_depths: false
+    has_renderer: false
+    has_offscreen_renderer: true
+    camera_names: ['robot0_agentview_left', 'robot0_agentview_right', 'robot0_eye_in_hand']
+    camera_widths: 256
+    camera_heights: 256
+    ignore_done: true
+    reward_shaping: false
