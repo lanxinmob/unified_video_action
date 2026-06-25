@@ -321,41 +321,43 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
             policy.eval()
 
             # ========= evaluate val video generation =========
-            if cfg.model.policy.autoregressive_model_params.predict_video:
-                fvd_log = test_video_fvd(
-                    cfg,
-                    policy,
-                    val_dataloader,
-                    local_epoch_idx,
-                    self.output_dir,
-                    device,
-                )
-                step_log.update(fvd_log)
+            if accelerator.is_main_process:
+                if cfg.model.policy.autoregressive_model_params.predict_video:
+                    fvd_log = test_video_fvd(
+                        cfg,
+                        policy,
+                        val_dataloader,
+                        local_epoch_idx,
+                        self.output_dir,
+                        device,
+                    )
+                    step_log.update(fvd_log)
 
-            # ========= evaluate val action error =========
-            if (
-                cfg.model.policy.action_model_params.predict_action
-                and "env_runner" not in cfg.task
-            ):
-                ## if has similartor, skip this
-                act_log = test_action_l2(
-                    cfg,
-                    policy,
-                    val_dataloader,
-                    local_epoch_idx,
-                    self.output_dir,
-                    device,
-                )
-                step_log.update(act_log)
+                # ========= evaluate val action error =========
+                if (
+                    cfg.model.policy.action_model_params.predict_action
+                    and "env_runner" not in cfg.task
+                ):
+                    ## if has similartor, skip this
+                    act_log = test_action_l2(
+                        cfg,
+                        policy,
+                        val_dataloader,
+                        local_epoch_idx,
+                        self.output_dir,
+                        device,
+                    )
+                    step_log.update(act_log)
 
-            # ========= simulator: run rollout =========
-            if (
-                cfg.model.policy.action_model_params.predict_action
-                and "env_runner" in cfg.task
-            ):
-                if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_rollout(cfg, env_runners, policy)
-                    step_log.update(runner_log)
+                # ========= simulator: run rollout =========
+                if (
+                    cfg.model.policy.action_model_params.predict_action
+                    and "env_runner" in cfg.task
+                ):
+                    if (self.epoch % cfg.training.rollout_every) == 0:
+                        runner_log = env_rollout(cfg, env_runners, policy)
+                        step_log.update(runner_log)
+            accelerator.wait_for_everyone()
 
             # ========= checkpoint =========
             if (
