@@ -20,13 +20,13 @@ val_dataloader:
   shuffle: false
 
 training:
-  checkpoint_every: 10
+  checkpoint_every: 1
   debug: false
   device: cuda:0
   gradient_accumulate_every: 1
   lr_scheduler: cosine
   lr_warmup_steps: 1000
-  max_train_steps: null
+  max_train_steps: 8000
   max_val_steps: null
   num_epochs: 3050
   resume: true
