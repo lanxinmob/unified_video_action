@@ -3,6 +3,7 @@ import sys
 sys.path.extend([".", "src"])
 import torch
 import os
+import gc
 from einops import rearrange
 import torch.nn.functional as F
 import wandb
@@ -232,6 +233,11 @@ def test_video_fvd(
     log_data[f"{name_label}video_fvd"] = fvd
     log_data[f"{name_label}real_img"] = real_video
     log_data[f"{name_label}predicted_img"] = pred_video
+
+    del i3d, real_embeddings, pred_embeddings, reals, predictions
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return log_data
 
