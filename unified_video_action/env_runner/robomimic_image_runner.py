@@ -27,6 +27,7 @@ from unified_video_action.env.robomimic.robomimic_image_wrapper import (
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
+from robomimic.envs.env_base import EnvType
 
 
 def create_env(env_meta, shape_meta, enable_render=True):
@@ -42,6 +43,42 @@ def create_env(env_meta, shape_meta, enable_render=True):
         use_image_obs=enable_render,
     )
     return env
+
+
+def _infer_robocasa_env_name(dataset_path):
+    path = pathlib.Path(dataset_path)
+    if path.suffix in {".hdf5", ".h5"} and path.parent.name:
+        return path.parent.parent.name
+    return path.name
+
+
+def _load_env_meta(dataset_path, env_kwargs=None, env_meta=None, env_name=None, env_type=None):
+    if env_kwargs is not None:
+        env_kwargs = OmegaConf.to_container(env_kwargs, resolve=True)
+    else:
+        env_kwargs = {}
+
+    if env_meta is not None:
+        env_meta = OmegaConf.to_container(env_meta, resolve=True)
+    else:
+        try:
+            env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
+        except KeyError as e:
+            env_name = env_name or _infer_robocasa_env_name(dataset_path)
+            env_type = env_type if env_type is not None else EnvType.ROBOSUITE_TYPE
+            env_meta = {
+                "env_name": env_name,
+                "type": env_type,
+                "env_kwargs": {},
+            }
+            print(
+                f"Dataset {dataset_path} has no robomimic env_args; "
+                f"using fallback env_meta for {env_name}."
+            )
+
+    env_meta.setdefault("env_kwargs", {})
+    env_meta["env_kwargs"].update(env_kwargs)
+    return env_meta
 
 
 class RobomimicImageRunner(BaseImageRunner):
@@ -71,6 +108,9 @@ class RobomimicImageRunner(BaseImageRunner):
         tqdm_interval_sec=5.0,
         n_envs=None,
         env_kwargs=None,
+        env_meta=None,
+        env_name=None,
+        env_type=None,
     ):
         super().__init__(output_dir)
 
@@ -82,11 +122,14 @@ class RobomimicImageRunner(BaseImageRunner):
         robosuite_fps = 20
         steps_per_render = max(robosuite_fps // fps, 1)
 
-        # read from dataset
-        env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
-        if env_kwargs is not None:
-            env_kwargs = OmegaConf.to_container(env_kwargs, resolve=True)
-            env_meta["env_kwargs"].update(env_kwargs)
+        # read from dataset, or fall back to explicit RoboCasa env config.
+        env_meta = _load_env_meta(
+            dataset_path=dataset_path,
+            env_kwargs=env_kwargs,
+            env_meta=env_meta,
+            env_name=env_name,
+            env_type=env_type,
+        )
         # disable object state observation
         env_meta["env_kwargs"]["use_object_obs"] = False
 
