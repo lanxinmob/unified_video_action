@@ -8,6 +8,7 @@ import tqdm
 import h5py
 import math
 import dill
+from omegaconf import OmegaConf
 import wandb.sdk.data_types.video as wv
 from unified_video_action.gym_util.async_vector_env import AsyncVectorEnv
 from unified_video_action.gym_util.multistep_wrapper import MultiStepWrapper
@@ -69,6 +70,7 @@ class RobomimicImageRunner(BaseImageRunner):
         abs_action=False,
         tqdm_interval_sec=5.0,
         n_envs=None,
+        env_kwargs=None,
     ):
         super().__init__(output_dir)
 
@@ -82,6 +84,9 @@ class RobomimicImageRunner(BaseImageRunner):
 
         # read from dataset
         env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
+        if env_kwargs is not None:
+            env_kwargs = OmegaConf.to_container(env_kwargs, resolve=True)
+            env_meta["env_kwargs"].update(env_kwargs)
         # disable object state observation
         env_meta["env_kwargs"]["use_object_obs"] = False
 

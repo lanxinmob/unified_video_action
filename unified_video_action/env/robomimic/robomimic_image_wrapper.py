@@ -33,24 +33,23 @@ class RobomimicImageWrapper(gym.Env):
         observation_space = spaces.Dict()
         for key, value in shape_meta["obs"].items():
             shape = value["shape"]
-            min_value, max_value = -1, 1
-            if key.endswith("image"):
+            obs_type = value.get("type", "low_dim")
+            if obs_type == "rgb":
                 min_value, max_value = 0, 1
-            elif key.endswith("quat"):
-                min_value, max_value = -1, 1
-            elif key.endswith("qpos"):
-                min_value, max_value = -1, 1
-            elif key.endswith("pos"):
-                # better range?
-                min_value, max_value = -1, 1
             else:
-                raise RuntimeError(f"Unsupported type {key}")
+                min_value, max_value = -1, 1
 
             this_space = spaces.Box(
                 low=min_value, high=max_value, shape=shape, dtype=np.float32
             )
             observation_space[key] = this_space
         self.observation_space = observation_space
+
+    @staticmethod
+    def _raw_obs_key(key):
+        if key.endswith("_rgb"):
+            return key[: -len("_rgb")] + "_image"
+        return key
 
     def get_observation(self, raw_obs=None):
         if raw_obs is None:
@@ -60,7 +59,8 @@ class RobomimicImageWrapper(gym.Env):
 
         obs = dict()
         for key in self.observation_space.keys():
-            obs[key] = raw_obs[key]
+            raw_key = self._raw_obs_key(key)
+            obs[key] = raw_obs[raw_key]
         return obs
 
     def seed(self, seed=None):
