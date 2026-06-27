@@ -58,6 +58,9 @@ dataset:
 env_runner:
   _target_: unified_video_action.env_runner.robomimic_image_runner.RobomimicImageRunner
   dataset_path: demo.hdf5
+  env_name: null
+  env_type: null
+  env_meta: null
   shape_meta: *shape_meta
   # costs 1GB per env
   n_train: 0
