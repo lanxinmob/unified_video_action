@@ -49,18 +49,59 @@ class RobomimicImageWrapper(gym.Env):
     def _raw_obs_key(key):
         if key.endswith("_rgb"):
             return key[: -len("_rgb")] + "_image"
-        return key
+        robocasa_key_map = {
+            "ee_pos": "robot0_eef_pos",
+            "ee_ori": "robot0_eef_quat",
+            "gripper_states": "robot0_gripper_qpos",
+        }
+        return robocasa_key_map.get(key, key)
+
+    @staticmethod
+    def _quat_to_axis_angle(quat):
+        quat = np.asarray(quat, dtype=np.float32)
+        quat = quat / np.maximum(np.linalg.norm(quat, axis=-1, keepdims=True), 1e-8)
+        w = np.clip(quat[..., 0], -1.0, 1.0)
+        xyz = quat[..., 1:]
+        sin_half = np.linalg.norm(xyz, axis=-1, keepdims=True)
+        angle = 2.0 * np.arctan2(sin_half[..., 0], w)
+        axis = xyz / np.maximum(sin_half, 1e-8)
+        return axis * angle[..., None]
+
+    @staticmethod
+    def _format_obs_value(key, value, target_shape):
+        value = np.asarray(value)
+        if key.endswith("_rgb"):
+            if value.ndim == 3 and value.shape[-1] == 3:
+                value = np.moveaxis(value, -1, 0)
+            if value.dtype == np.uint8:
+                value = value.astype(np.float32) / 255.0
+            else:
+                value = value.astype(np.float32)
+        elif key == "ee_ori" and value.shape[-1] == 4 and target_shape[-1] == 3:
+            value = RobomimicImageWrapper._quat_to_axis_angle(value)
+        else:
+            value = value.astype(np.float32)
+        return value
+
+    @staticmethod
+    def _format_render_image(value):
+        value = np.asarray(value)
+        if value.ndim == 3 and value.shape[-1] == 3:
+            value = np.moveaxis(value, -1, 0)
+        if value.dtype == np.uint8:
+            value = value.astype(np.float32) / 255.0
+        return value
 
     def get_observation(self, raw_obs=None):
         if raw_obs is None:
             raw_obs = self.env.get_observation()
 
-        self.render_cache = raw_obs[self.render_obs_key]
+        self.render_cache = self._format_render_image(raw_obs[self.render_obs_key])
 
         obs = dict()
-        for key in self.observation_space.keys():
+        for key, space in self.observation_space.items():
             raw_key = self._raw_obs_key(key)
-            obs[key] = raw_obs[raw_key]
+            obs[key] = self._format_obs_value(key, raw_obs[raw_key], space.shape)
         return obs
 
     def seed(self, seed=None):
@@ -69,6 +110,9 @@ class RobomimicImageWrapper(gym.Env):
 
     def reset(self):
         if self.init_state is not None:
+            if not hasattr(self.env, "reset_to"):
+                raw_obs = self.env.reset()
+                return self.get_observation(raw_obs)
             if not self.has_reset_before:
                 # the env must be fully reset at least once to ensure correct rendering
                 self.env.reset()
@@ -80,15 +124,17 @@ class RobomimicImageWrapper(gym.Env):
         elif self._seed is not None:
             # reset to a specific seed
             seed = self._seed
-            if seed in self.seed_state_map:
+            can_cache_seed = hasattr(self.env, "reset_to") and hasattr(self.env, "get_state")
+            if can_cache_seed and seed in self.seed_state_map:
                 # env.reset is expensive, use cache
                 raw_obs = self.env.reset_to({"states": self.seed_state_map[seed]})
             else:
                 # robosuite's initializes all use numpy global random state
                 np.random.seed(seed=seed)
                 raw_obs = self.env.reset()
-                state = self.env.get_state()["states"]
-                self.seed_state_map[seed] = state
+                if can_cache_seed:
+                    state = self.env.get_state()["states"]
+                    self.seed_state_map[seed] = state
             self._seed = None
         else:
             # random reset

@@ -8,6 +8,8 @@ import tqdm
 import h5py
 import math
 import dill
+import ast
+import pickle
 from omegaconf import OmegaConf
 import wandb.sdk.data_types.video as wv
 from unified_video_action.gym_util.async_vector_env import AsyncVectorEnv
@@ -30,6 +32,14 @@ import robomimic.utils.obs_utils as ObsUtils
 from robomimic.envs.env_base import EnvType
 
 
+def _to_plain_container(value):
+    if value is None:
+        return None
+    if OmegaConf.is_config(value):
+        return OmegaConf.to_container(value, resolve=True)
+    return value
+
+
 def create_env(env_meta, shape_meta, enable_render=True):
     modality_mapping = collections.defaultdict(list)
     for key, attr in shape_meta["obs"].items():
@@ -45,6 +55,23 @@ def create_env(env_meta, shape_meta, enable_render=True):
     return env
 
 
+def create_robocasa_env(env_kwargs, shape_meta, controller_configs_path=None):
+    import robosuite
+
+    # Import for RoboCasa environment registration side effects.
+    try:
+        import robocasa.utils.dataset_registry  # noqa: F401
+    except ImportError:
+        pass
+
+    env_kwargs = dict(env_kwargs)
+    if controller_configs_path is not None:
+        with open(os.path.expanduser(controller_configs_path), "rb") as pickle_file:
+            env_kwargs["controller_configs"] = pickle.load(pickle_file)
+
+    return robosuite.make(**env_kwargs)
+
+
 def _infer_robocasa_env_name(dataset_path):
     path = pathlib.Path(dataset_path)
     if path.suffix in {".hdf5", ".h5"} and path.parent.name:
@@ -53,13 +80,10 @@ def _infer_robocasa_env_name(dataset_path):
 
 
 def _load_env_meta(dataset_path, env_kwargs=None, env_meta=None, env_name=None, env_type=None):
-    if env_kwargs is not None:
-        env_kwargs = OmegaConf.to_container(env_kwargs, resolve=True)
-    else:
-        env_kwargs = {}
+    env_kwargs = _to_plain_container(env_kwargs) or {}
 
     if env_meta is not None:
-        env_meta = OmegaConf.to_container(env_meta, resolve=True)
+        env_meta = _to_plain_container(env_meta)
     else:
         try:
             env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
@@ -79,6 +103,16 @@ def _load_env_meta(dataset_path, env_kwargs=None, env_meta=None, env_name=None, 
     env_meta.setdefault("env_kwargs", {})
     env_meta["env_kwargs"].update(env_kwargs)
     return env_meta
+
+
+def _build_robocasa_env_kwargs(dataset_path, env_kwargs=None, env_name=None):
+    env_kwargs = _to_plain_container(env_kwargs) or {}
+    env_kwargs = dict(env_kwargs)
+    env_kwargs["env_name"] = env_name or env_kwargs.get("env_name") or _infer_robocasa_env_name(dataset_path)
+    layout_and_style_ids = env_kwargs.get("layout_and_style_ids")
+    if isinstance(layout_and_style_ids, str):
+        env_kwargs["layout_and_style_ids"] = ast.literal_eval(layout_and_style_ids)
+    return env_kwargs
 
 
 class RobomimicImageRunner(BaseImageRunner):
@@ -111,6 +145,8 @@ class RobomimicImageRunner(BaseImageRunner):
         env_meta=None,
         env_name=None,
         env_type=None,
+        use_robocasa_env=False,
+        controller_configs_path=None,
     ):
         super().__init__(output_dir)
 
@@ -122,28 +158,51 @@ class RobomimicImageRunner(BaseImageRunner):
         robosuite_fps = 20
         steps_per_render = max(robosuite_fps // fps, 1)
 
-        # read from dataset, or fall back to explicit RoboCasa env config.
-        env_meta = _load_env_meta(
-            dataset_path=dataset_path,
-            env_kwargs=env_kwargs,
-            env_meta=env_meta,
-            env_name=env_name,
-            env_type=env_type,
-        )
-        # disable object state observation
-        env_meta["env_kwargs"]["use_object_obs"] = False
+        if use_robocasa_env:
+            robocasa_env_kwargs = _build_robocasa_env_kwargs(
+                dataset_path=dataset_path,
+                env_kwargs=env_kwargs,
+                env_name=env_name,
+            )
+            env_meta = {
+                "env_name": robocasa_env_kwargs["env_name"],
+                "env_kwargs": robocasa_env_kwargs,
+            }
+        else:
+            # read from dataset, or fall back to explicit RoboCasa env config.
+            env_meta = _load_env_meta(
+                dataset_path=dataset_path,
+                env_kwargs=env_kwargs,
+                env_meta=env_meta,
+                env_name=env_name,
+                env_type=env_type,
+            )
+            # disable object state observation
+            env_meta["env_kwargs"]["use_object_obs"] = False
 
         rotation_transformer = None
         if abs_action:
+            if use_robocasa_env and controller_configs_path is not None:
+                raise ValueError("abs_action=True is not supported with controller_configs_path.")
             env_meta["env_kwargs"]["controller_configs"]["control_delta"] = False
             rotation_transformer = RotationTransformer("axis_angle", "rotation_6d")
 
         def env_fn():
-            robomimic_env = create_env(env_meta=env_meta, shape_meta=shape_meta)
+            if use_robocasa_env:
+                robomimic_env = create_robocasa_env(
+                    env_meta["env_kwargs"],
+                    shape_meta=shape_meta,
+                    controller_configs_path=controller_configs_path,
+                )
+            else:
+                robomimic_env = create_env(env_meta=env_meta, shape_meta=shape_meta)
             # Robosuite's hard reset causes excessive memory consumption.
             # Disabled to run more envs.
             # https://github.com/ARISE-Initiative/robosuite/blob/92abf5595eddb3a845cd1093703e5a3ccd01e77e/robosuite/environments/base.py#L247-L248
-            robomimic_env.env.hard_reset = False
+            if hasattr(robomimic_env, "env"):
+                robomimic_env.env.hard_reset = False
+            elif hasattr(robomimic_env, "hard_reset"):
+                robomimic_env.hard_reset = False
             return MultiStepWrapper(
                 VideoRecordingWrapper(
                     RobomimicImageWrapper(
@@ -173,9 +232,16 @@ class RobomimicImageRunner(BaseImageRunner):
         # a separate env_fn that does not create OpenGL context (enable_render=False)
         # is needed to initialize spaces.
         def dummy_env_fn():
-            robomimic_env = create_env(
-                env_meta=env_meta, shape_meta=shape_meta, enable_render=False
-            )
+            if use_robocasa_env:
+                robomimic_env = create_robocasa_env(
+                    env_meta["env_kwargs"],
+                    shape_meta=shape_meta,
+                    controller_configs_path=controller_configs_path,
+                )
+            else:
+                robomimic_env = create_env(
+                    env_meta=env_meta, shape_meta=shape_meta, enable_render=False
+                )
             return MultiStepWrapper(
                 VideoRecordingWrapper(
                     RobomimicImageWrapper(

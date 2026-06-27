@@ -58,6 +58,8 @@ dataset:
 env_runner:
   _target_: unified_video_action.env_runner.robomimic_image_runner.RobomimicImageRunner
   dataset_path: demo.hdf5
+  use_robocasa_env: true
+  controller_configs_path: robocasa_controller_configs.pkl
   env_name: null
   env_type: null
   env_meta: null
@@ -80,11 +82,13 @@ env_runner:
   tqdm_interval_sec: 1.0
   n_envs: 1
   env_kwargs:
+    robots: PandaMobile
     seed: 1111111
     obj_instance_split: 'test'
-    style_ids: -2
-    layout_ids: -2
     layout_and_style_ids: null
+    generative_textures: null
+    randomize_cameras: false
+    translucent_robot: false
     clutter_mode: 0
 
     use_camera_obs: true
@@ -93,7 +97,7 @@ env_runner:
     has_renderer: false
     has_offscreen_renderer: true
     camera_names: ['robot0_agentview_left', 'robot0_agentview_right', 'robot0_eye_in_hand']
-    camera_widths: 256
-    camera_heights: 256
+    camera_widths: 224
+    camera_heights: 224
     ignore_done: true
     reward_shaping: false
