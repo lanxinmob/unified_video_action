@@ -37,77 +37,13 @@ TASK_MAX_STEPS = {
     "TurnOffMicrowave": 500,
 }
 
-COMPOSITE_SEEN_TASKS = [
-    "PnPCounterToCab",
-    "PnPCabToCounter",
-    "PnPCounterToSink",
-    "PnPSinkToCounter",
-    "PnPCounterToMicrowave",
-    "PnPMicrowaveToCounter",
-    "PnPCounterToStove",
-    "PnPStoveToCounter",
-]
-ATOMIC_SEEN_TASKS = [
-    "OpenSingleDoor",
-    "CloseSingleDoor",
-    "OpenDoubleDoor",
-    "CloseDoubleDoor",
-    "OpenDrawer",
-    "CloseDrawer",
-    "TurnOnStove",
-    "TurnOffStove",
-    "TurnOnSinkFaucet",
-    "TurnOffSinkFaucet",
-    "TurnSinkSpout",
-    "CoffeePressButton",
-    "TurnOnMicrowave",
-    "TurnOffMicrowave",
-]
-COMPOSITE_UNSEEN_TASKS = [
-    "CoffeeSetupMug",
-    "CoffeeServeMug",
-]
-ALL_TASKS = COMPOSITE_SEEN_TASKS + ATOMIC_SEEN_TASKS + COMPOSITE_UNSEEN_TASKS
-TASK_SETS = {
-    "all": ALL_TASKS,
-    "atomic_seen": ATOMIC_SEEN_TASKS,
-    "composite_seen": COMPOSITE_SEEN_TASKS,
-    "composite_unseen": COMPOSITE_UNSEEN_TASKS,
-}
+ALL_TASKS = list(TASK_MAX_STEPS.keys())
 
 
 def parse_seeds(seed_arg):
     if isinstance(seed_arg, str):
         return [int(x.strip()) for x in seed_arg.split(",") if x.strip()]
     return [int(seed_arg)]
-
-
-def unique_preserve_order(items):
-    seen = set()
-    result = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
-
-
-def resolve_tasks(task_sets, tasks):
-    if tasks:
-        return unique_preserve_order(tasks)
-
-    resolved = []
-    for task_set in task_sets:
-        if task_set in TASK_SETS:
-            resolved.extend(TASK_SETS[task_set])
-        elif task_set in TASK_MAX_STEPS:
-            resolved.append(task_set)
-        else:
-            known = ", ".join(sorted(TASK_SETS.keys()))
-            raise ValueError(
-                f"Unknown task set or task '{task_set}'. Known task sets: {known}"
-            )
-    return unique_preserve_order(resolved)
 
 
 def load_controller_configs(path):
@@ -457,29 +393,18 @@ def build_jobs(tasks, seeds, num_shards, shard_id):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Evaluate a UVA RoboCasa checkpoint with Cosmos-style env kwargs."
+        description=(
+            "Evaluate a UVA RoboCasa checkpoint on the fixed 24-task RoboCasa "
+            "benchmark: 50 trials per task and 3 seeds by default."
+        )
     )
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--device", default="cuda:0")
-    parser.add_argument(
-        "--task_set",
-        nargs="+",
-        default=["all"],
-        help="Task sets or task names. Use all for the 24-task 3600-trial benchmark.",
-    )
-    parser.add_argument(
-        "--tasks",
-        nargs="+",
-        default=None,
-        help="Explicit task names. Overrides --task_set.",
-    )
-    parser.add_argument("--num_rollouts", type=int, default=50)
+    parser.add_argument("--num_trials_per_task", type=int, default=50)
     parser.add_argument("--seeds", default="195,196,197")
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_id", type=int, default=0)
-    parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--split", default="pretrain")
     parser.add_argument("--robots", default="PandaMobile")
     parser.add_argument("--controller_configs_path", default="robocasa_controller_configs.pkl")
     parser.add_argument("--env_img_res", type=int, default=224)
@@ -501,20 +426,15 @@ def main():
         raise ValueError("--num_shards must be >= 1")
     if not (0 <= args.shard_id < args.num_shards):
         raise ValueError("--shard_id must be in [0, num_shards)")
-    if args.num_envs != 1:
-        print(
-            "Note: this script accepts --num_envs for compatibility, "
-            "but currently runs envs serially inside each shard."
-        )
 
     output_dir = Path(args.output_dir)
     device = torch.device(args.device)
-    tasks = resolve_tasks(args.task_set, args.tasks)
+    tasks = ALL_TASKS
     seeds = parse_seeds(args.seeds)
     jobs = build_jobs(tasks, seeds, args.num_shards, args.shard_id)
 
-    expected_trials = len(tasks) * len(seeds) * args.num_rollouts
-    shard_trials = len(jobs) * args.num_rollouts
+    expected_trials = len(tasks) * len(seeds) * args.num_trials_per_task
+    shard_trials = len(jobs) * args.num_trials_per_task
     print(f"Tasks: {len(tasks)} | seeds: {seeds} | total planned trials: {expected_trials}")
     print(f"Shard {args.shard_id}/{args.num_shards}: {len(jobs)} jobs, {shard_trials} trials")
 
@@ -524,7 +444,7 @@ def main():
     for task_name, seed in jobs:
         job_successes = []
         print(f"\nRunning task={task_name} seed={seed}")
-        for episode_idx in range(args.num_rollouts):
+        for episode_idx in range(args.num_trials_per_task):
             result = run_episode(
                 policy=policy,
                 cfg=cfg,
@@ -538,18 +458,16 @@ def main():
             job_successes.append(int(result["success"]))
             rate = float(np.mean(job_successes))
             print(
-                f"  trial {episode_idx + 1:03d}/{args.num_rollouts}: "
+                f"  trial {episode_idx + 1:03d}/{args.num_trials_per_task}: "
                 f"success={int(result['success'])} steps={result['num_steps']} "
                 f"rate={rate:.3f}"
             )
 
             partial = {
                 "checkpoint": args.checkpoint,
-                "split": args.split,
-                "task_sets": args.task_set,
                 "tasks": tasks,
                 "seeds": seeds,
-                "num_rollouts": args.num_rollouts,
+                "num_trials_per_task": args.num_trials_per_task,
                 "num_shards": args.num_shards,
                 "shard_id": args.shard_id,
                 "results": results,
@@ -562,11 +480,9 @@ def main():
 
     final = {
         "checkpoint": args.checkpoint,
-        "split": args.split,
-        "task_sets": args.task_set,
         "tasks": tasks,
         "seeds": seeds,
-        "num_rollouts": args.num_rollouts,
+        "num_trials_per_task": args.num_trials_per_task,
         "num_shards": args.num_shards,
         "shard_id": args.shard_id,
         "results": results,
