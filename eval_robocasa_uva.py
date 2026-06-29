@@ -432,7 +432,10 @@ def get_language_goal(env):
     try:
         ep_meta = env.get_ep_meta()
         if isinstance(ep_meta, dict):
-            return ep_meta.get("lang")
+            for key in ("lang", "language", "language_instruction", "task_description"):
+                value = ep_meta.get(key)
+                if value:
+                    return value
     except Exception:
         return None
     return None

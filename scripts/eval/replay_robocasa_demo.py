@@ -67,6 +67,42 @@ def get_attr_json(attrs, key):
     return value
 
 
+def decode_hdf5_value(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            return decode_hdf5_value(value.item())
+        return value.tolist()
+    return value
+
+
+def read_group_value(group, key):
+    if key not in group:
+        return None
+    value = group[key]
+    if isinstance(value, h5py.Dataset):
+        return decode_hdf5_value(value[()])
+    return None
+
+
+def to_jsonable(value):
+    value = decode_hdf5_value(value)
+    if isinstance(value, dict):
+        return {str(k): to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def print_json(label, value):
+    print(f"{label}={json.dumps(to_jsonable(value), ensure_ascii=False, sort_keys=True)}")
+
+
 def infer_task_name(hdf5_file, demo):
     ep_meta = get_attr_json(demo.attrs, "ep_meta")
     if isinstance(ep_meta, dict):
@@ -94,20 +130,26 @@ def load_dataset_env_kwargs(hdf5_file):
     return env_kwargs
 
 
+def load_dataset_env_args(hdf5_file):
+    env_args = get_attr_json(hdf5_file["data"].attrs, "env_args")
+    return env_args if isinstance(env_args, dict) else {}
+
+
 def get_initial_state(demo):
     if "states" not in demo or demo["states"].shape[0] == 0:
         return None
     return np.asarray(demo["states"][0])
 
 
-def get_model_xml(demo):
+def get_model_xml(hdf5_file, demo):
+    for attrs in (demo.attrs, hdf5_file["data"].attrs):
+        for key in ("model_file", "model_xml"):
+            if key in attrs:
+                return decode_hdf5_value(attrs[key])
     for key in ("model_file", "model_xml"):
-        if key not in demo.attrs:
-            continue
-        value = demo.attrs[key]
-        if isinstance(value, bytes):
-            value = value.decode("utf-8")
-        return value
+        value = read_group_value(demo, key)
+        if value is not None:
+            return value
     return None
 
 
@@ -174,9 +216,15 @@ def make_env(args, task_name, dataset_env_kwargs=None):
         "has_renderer": args.render,
         "has_offscreen_renderer": True,
         "ignore_done": True,
-        "seed": args.seed,
-        "control_freq": args.control_freq,
     })
+    if args.seed is not None:
+        env_kwargs["seed"] = args.seed
+    else:
+        env_kwargs.setdefault("seed", 1111111)
+    if args.control_freq is not None:
+        env_kwargs["control_freq"] = args.control_freq
+    else:
+        env_kwargs.setdefault("control_freq", 20)
     controller_source = "dataset"
     if args.controller_configs_path is not None:
         env_kwargs["controller_configs"] = load_controller_configs(args.controller_configs_path)
@@ -226,8 +274,8 @@ def main():
     parser.add_argument("--controller_configs_path", default=None)
     parser.add_argument("--fallback_controller_configs_path", default="unified_video_action/config/robocasa_controller_configs.pkl")
     parser.add_argument("--robots", default="PandaMobile")
-    parser.add_argument("--seed", type=int, default=1111111)
-    parser.add_argument("--control_freq", type=int, default=20)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--control_freq", type=int, default=None)
     parser.add_argument("--env_img_res", type=int, default=224)
     parser.add_argument("--obj_instance_split", default=None)
     parser.add_argument("--layout_and_style_ids", default=None)
@@ -239,6 +287,7 @@ def main():
     parser.add_argument("--video_dir", default="data/outputs/robocasa_demo_replay/videos")
     parser.add_argument("--video_fps", type=int, default=20)
     parser.add_argument("--video_stride", type=int, default=1)
+    parser.add_argument("--dump_env_args", action="store_true")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset)
@@ -250,7 +299,8 @@ def main():
         demo = hdf5_file[f"data/{demo_key}"]
         actions = np.asarray(demo["actions"][:], dtype=np.float32)
         states0 = get_initial_state(demo)
-        model_xml = get_model_xml(demo)
+        model_xml = get_model_xml(hdf5_file, demo)
+        dataset_env_args = load_dataset_env_args(hdf5_file)
         task_name = args.task or infer_task_name(hdf5_file, demo)
         dataset_env_kwargs = load_dataset_env_kwargs(hdf5_file)
         if task_name is None:
@@ -280,6 +330,10 @@ def main():
         print(f"control_freq={env_kwargs.get('control_freq')}")
         print(f"robots={env_kwargs.get('robots')}")
         print(f"controller_source={controller_source}")
+        if args.dump_env_args:
+            print_json("dataset_env_args", dataset_env_args)
+            print_json("dataset_env_kwargs", dataset_env_kwargs)
+            print_json("final_env_kwargs", env_kwargs)
 
         max_steps = len(actions) if args.max_steps is None else min(args.max_steps, len(actions))
         if args.save_video:
