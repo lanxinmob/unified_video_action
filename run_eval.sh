@@ -8,6 +8,7 @@
   SEEDS=195,196,197
   NUM_SHARDS=4
   GPU_IDS=(4 5 6 7)
+  OBJ_INSTANCE_SPLIT=B
 
   mkdir -p "$LOG_DIR"
 
@@ -22,6 +23,7 @@
               --output_dir "$OUTPUT_DIR" \
               --device cuda:0 \
               --controller_configs_path "$CONTROLLER_CONFIGS_PATH" \
+              --obj_instance_split "$OBJ_INSTANCE_SPLIT" \
               --num_trials_per_task "$NUM_TRIALS_PER_TASK" \
               --seeds "$SEEDS" \
               --num_shards "$NUM_SHARDS" \
