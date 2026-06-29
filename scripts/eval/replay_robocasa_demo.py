@@ -2,6 +2,7 @@ import argparse
 import ast
 import json
 import pickle
+import re
 import sys
 from pathlib import Path
 
@@ -132,7 +133,18 @@ def make_env(args, task_name):
     }
     env_kwargs = {k: v for k, v in env_kwargs.items() if v is not None}
     env_kwargs = merge_registry_task_kwargs(task_name, env_kwargs)
-    return robosuite.make(**env_kwargs), env_kwargs
+    while True:
+        try:
+            return robosuite.make(**env_kwargs), env_kwargs
+        except TypeError as exc:
+            match = re.search(r"unexpected keyword argument '([^']+)'", str(exc))
+            if match is None:
+                raise
+            bad_key = match.group(1)
+            if bad_key not in env_kwargs:
+                raise
+            print(f"RoboCasa env does not accept '{bad_key}'; retrying without it.")
+            env_kwargs.pop(bad_key)
 
 
 def main():
@@ -149,7 +161,7 @@ def main():
     parser.add_argument("--env_img_res", type=int, default=224)
     parser.add_argument("--obj_instance_split", default="train")
     parser.add_argument("--layout_and_style_ids", default=None)
-    parser.add_argument("--clutter_mode", type=int, default=0)
+    parser.add_argument("--clutter_mode", type=int, default=None)
     parser.add_argument("--randomize_cameras", action="store_true")
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--max_steps", type=int, default=None)
