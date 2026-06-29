@@ -199,6 +199,7 @@ def create_robocasa_env(cfg, args, task_name, seed, episode_idx):
         ],
         "camera_widths": args.env_img_res,
         "camera_heights": args.env_img_res,
+        "control_freq": args.control_freq,
         "camera_depths": False,
         "use_camera_obs": True,
         "has_renderer": False,
@@ -360,15 +361,15 @@ def zero_action(env):
     return np.zeros(dim, dtype=np.float32)
 
 
-def adjust_action_dim(action, env_action_dim):
+def validate_action_dim(action, env_action_dim):
     action = np.asarray(action, dtype=np.float32)
-    if action.shape[-1] == env_action_dim:
-        return action
-    if action.shape[-1] < env_action_dim:
-        padded = np.zeros(env_action_dim, dtype=np.float32)
-        padded[: action.shape[-1]] = action
-        return padded
-    return action[:env_action_dim]
+    if action.shape[-1] != env_action_dim:
+        raise ValueError(
+            f"Predicted action dim {action.shape[-1]} does not match RoboCasa "
+            f"env action dim {env_action_dim}. Refusing to pad or truncate because "
+            "the training and eval action order must match exactly."
+        )
+    return action
 
 
 def load_policy(checkpoint_path, output_dir, device):
@@ -399,6 +400,14 @@ def load_policy(checkpoint_path, output_dir, device):
 
     use_ema = bool(cfg.training.get("use_ema", False))
     policy = workspace.ema_model if use_ema else workspace.model
+    if "robocasa" in str(getattr(policy, "task_name", "")).lower() and getattr(
+        policy, "language_emb_model", None
+    ) is None:
+        raise ValueError(
+            "This RoboCasa eval requires a language-conditioned checkpoint. "
+            "The loaded checkpoint has language_emb_model=None, so it would ignore "
+            "the task prompt."
+        )
     policy.to(device)
     policy.eval()
     return policy, cfg
@@ -467,6 +476,14 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
             obs_window.append(first_frame)
 
         env_action_dim = get_env_action_dim(env)
+        policy_action_dim = getattr(policy, "action_dim", None)
+        if policy_action_dim is not None and int(policy_action_dim) != env_action_dim:
+            raise ValueError(
+                f"Policy action dim {int(policy_action_dim)} does not match "
+                f"RoboCasa env action dim {env_action_dim}. Check that the checkpoint "
+                "shape_meta, robot, controller_configs, and action layout are the same "
+                "as the demonstrations used for training."
+            )
         if args.default_max_steps is None:
             max_steps = int(get_cfg_env_value(cfg, "max_steps", 500))
         else:
@@ -489,7 +506,7 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
                 chunk_len = min(num_open_loop_steps, len(action_chunk))
 
                 for action_idx in range(chunk_len):
-                    action = adjust_action_dim(action_chunk[action_idx], env_action_dim)
+                    action = validate_action_dim(action_chunk[action_idx], env_action_dim)
                     raw_obs, _, done, info = env.step(action)
                     num_steps += 1
                     if args.save_video and (num_steps % args.video_stride == 0):
@@ -611,6 +628,7 @@ def parse_args():
     parser.add_argument("--robots", default=None)
     parser.add_argument("--controller_configs_path", default="robocasa_controller_configs.pkl")
     parser.add_argument("--env_img_res", type=int, default=224)
+    parser.add_argument("--control_freq", type=int, default=20)
     parser.add_argument("--layout_and_style_ids", default=None)
     parser.add_argument("--obj_instance_split", default=None)
     parser.add_argument("--randomize_cameras", action="store_true")
