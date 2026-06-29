@@ -8,7 +8,7 @@
   SEEDS=195,196,197
   NUM_SHARDS=4
   GPU_IDS=(4 5 6 7)
-  OBJ_INSTANCE_SPLIT=B
+ 
 
   mkdir -p "$LOG_DIR"
 
