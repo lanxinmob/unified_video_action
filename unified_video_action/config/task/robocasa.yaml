@@ -35,11 +35,49 @@ shape_meta: &shape_meta
       - 224
       - 224
       type: rgb
+    language:
+      shape:
+      - 2
+      - 30
+
+shape_meta_env: &shape_meta_env
+  image_resolution: 224
+  action:
+    shape:
+    - 12
+  obs:
+    ee_pos:
+      shape:
+      - 3
+    ee_ori:
+      shape:
+      - 3
+    gripper_states:
+      shape:
+      - 2
+    robot0_agentview_left_rgb:
+      shape:
+      - 3
+      - 224
+      - 224
+      type: rgb
+    robot0_agentview_right_rgb:
+      shape:
+      - 3
+      - 224
+      - 224
+      type: rgb
+    robot0_eye_in_hand_rgb:
+      shape:
+      - 3
+      - 224
+      - 224
+      type: rgb
 
 dataset:
   _target_: unified_video_action.dataset.robomimic_replay_image_dataset.RobomimicReplayImageDataset
   shape_meta: *shape_meta
-  language_emb_model: null
+  language_emb_model: clip
   abs_action: false
   dataset_path: data/robocasa/demo.hdf5
   horizon: 32
@@ -63,7 +101,7 @@ env_runner:
   env_name: null
   env_type: null
   env_meta: null
-  shape_meta: *shape_meta
+  shape_meta: *shape_meta_env
   # costs 1GB per env
   n_train: 0
   n_train_vis: 1
@@ -99,5 +137,6 @@ env_runner:
     camera_names: ['robot0_agentview_left', 'robot0_agentview_right', 'robot0_eye_in_hand']
     camera_widths: 224
     camera_heights: 224
+    control_freq: 20
     ignore_done: true
     reward_shaping: false

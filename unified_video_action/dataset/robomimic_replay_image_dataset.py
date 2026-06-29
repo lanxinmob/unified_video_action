@@ -1,4 +1,5 @@
 from typing import Dict, List
+import json
 import torch
 import numpy as np
 import h5py
@@ -12,6 +13,7 @@ from filelock import FileLock
 from threadpoolctl import threadpool_limits
 import concurrent.futures
 import multiprocessing
+from transformers import AutoTokenizer
 from unified_video_action.common.pytorch_util import dict_apply
 from unified_video_action.dataset.base_dataset import BaseImageDataset, LinearNormalizer
 from unified_video_action.model.common.normalizer import (
@@ -42,10 +44,35 @@ def _demo_sort_key(key):
     return (1, key)
 
 
-def _get_cache_zarr_path(dataset_path, recursive_hdf5):
+def _get_cache_zarr_path(dataset_path, recursive_hdf5, language_emb_model=None):
+    suffix = f"_{language_emb_model}" if language_emb_model is not None else ""
     if recursive_hdf5:
-        return os.path.normpath(dataset_path) + ".zarr.zip"
-    return dataset_path + ".zarr.zip"
+        return os.path.normpath(dataset_path) + suffix + ".zarr.zip"
+    return dataset_path + suffix + ".zarr.zip"
+
+
+def _decode_hdf5_attr(value):
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _get_demo_language(demo, hdf5_path, demo_key):
+    ep_meta = _decode_hdf5_attr(demo.attrs.get("ep_meta"))
+    if isinstance(ep_meta, dict):
+        for key in ("lang", "language", "language_instruction"):
+            value = ep_meta.get(key)
+            if value:
+                return str(value)
+    raise RuntimeError(
+        f"Missing language instruction for {hdf5_path}:{demo_key}. "
+        "Expected demo.attrs['ep_meta'] to contain a 'lang' field."
+    )
 
 
 def _remove_if_exists(path):
@@ -103,7 +130,9 @@ class RobomimicReplayImageDataset(BaseImageDataset):
 
         replay_buffer = None
         if use_cache:
-            cache_zarr_path = _get_cache_zarr_path(dataset_path, recursive_hdf5)
+            cache_zarr_path = _get_cache_zarr_path(
+                dataset_path, recursive_hdf5, language_emb_model=language_emb_model
+            )
             cache_lock_path = cache_zarr_path + ".lock"
             print("Acquiring lock on cache.")
             print("Cache path:", cache_zarr_path)
@@ -120,6 +149,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                             abs_action=abs_action,
                             rotation_transformer=rotation_transformer,
                             recursive_hdf5=recursive_hdf5,
+                            language_emb_model=language_emb_model,
                         )
                         print("Saving cache to disk.")
                         with zarr.ZipStore(cache_zarr_path) as zip_store:
@@ -142,6 +172,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                 abs_action=abs_action,
                 rotation_transformer=rotation_transformer,
                 recursive_hdf5=recursive_hdf5,
+                language_emb_model=language_emb_model,
             )
 
         rgb_keys = list()
@@ -239,6 +270,8 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                 or key.endswith("width")
             ):
                 this_normalizer = get_range_normalizer_from_stat(stat)
+            elif key.endswith("language"):
+                continue
             else:
                 raise RuntimeError("unsupported")
             normalizer[key] = this_normalizer
@@ -319,6 +352,7 @@ def _convert_robomimic_to_replay(
     n_workers=None,
     max_inflight_tasks=None,
     recursive_hdf5=False,
+    language_emb_model=None,
 ):
     if n_workers is None:
         n_workers = multiprocessing.cpu_count()
@@ -345,7 +379,18 @@ def _convert_robomimic_to_replay(
     hdf5_paths = _get_hdf5_paths(dataset_path, recursive_hdf5)
     file_handles = []
     demos_all = []
+    language_all = []
     try:
+        tokenizer = None
+        seq_max_len = None
+        if language_emb_model == "clip":
+            tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+            seq_max_len = 30
+        elif language_emb_model is not None:
+            raise NotImplementedError(
+                f"Language model {language_emb_model} not implemented"
+            )
+
         for hdf5_path in hdf5_paths:
             print(f"Loading {hdf5_path}")
             file = h5py.File(hdf5_path, "r")
@@ -357,10 +402,33 @@ def _convert_robomimic_to_replay(
             )
             for demo_key in demo_keys:
                 demos_all.append((hdf5_path, demos[demo_key]))
+                if language_emb_model is not None:
+                    language_all.append(
+                        _get_demo_language(demos[demo_key], hdf5_path, demo_key)
+                    )
 
         # count total steps
         if len(demos_all) == 0:
             raise RuntimeError(f"No demos with actions found in {dataset_path}")
+        if language_emb_model is not None and len(language_all) != len(demos_all):
+            raise RuntimeError("Language metadata count does not match demo count.")
+
+        language_tokens_all = None
+        if language_emb_model == "clip":
+            language_tokens_all = []
+            for language in language_all:
+                tokens = tokenizer(
+                    language,
+                    padding="max_length",
+                    max_length=seq_max_len,
+                    return_tensors="pt",
+                )
+                language_tokens_all.append(
+                    torch.cat(
+                        [tokens.input_ids.unsqueeze(1), tokens.attention_mask.unsqueeze(1)],
+                        dim=1,
+                    )
+                )
         episode_ends = list()
         prev_end = 0
         for _, demo in demos_all:
@@ -383,9 +451,18 @@ def _convert_robomimic_to_replay(
             data_key = "obs/" + key
             if key == "action":
                 data_key = "actions"
+            if key == "language":
+                continue
             this_data = list()
-            for _, demo in demos_all:
+            this_language_data = list()
+            for demo_idx, (_, demo) in enumerate(demos_all):
                 this_data.append(demo[data_key][:].astype(np.float32))
+                if key == "action" and language_tokens_all is not None:
+                    this_language_data.append(
+                        language_tokens_all[demo_idx].repeat(
+                            this_data[-1].shape[0], 1, 1
+                        ).numpy()
+                    )
             this_data = np.concatenate(this_data, axis=0)
             if key == "action":
                 this_data = _convert_actions(
@@ -396,6 +473,9 @@ def _convert_robomimic_to_replay(
                 assert this_data.shape == (n_steps,) + tuple(
                     shape_meta["action"]["shape"]
                 )
+                if language_tokens_all is not None:
+                    this_language_data = np.concatenate(this_language_data, axis=0)
+                    assert this_language_data.shape == (n_steps, 2, seq_max_len)
             else:
                 assert this_data.shape == (n_steps,) + tuple(
                     shape_meta["obs"][key]["shape"]
@@ -408,6 +488,15 @@ def _convert_robomimic_to_replay(
                 compressor=None,
                 dtype=this_data.dtype,
             )
+            if key == "action" and language_tokens_all is not None:
+                _ = data_group.array(
+                    name="language",
+                    data=this_language_data,
+                    shape=this_language_data.shape,
+                    chunks=this_language_data.shape,
+                    compressor=None,
+                    dtype=this_language_data.dtype,
+                )
 
         def img_copy(zarr_arr, zarr_idx, hdf5_arr, hdf5_idx):
             try:

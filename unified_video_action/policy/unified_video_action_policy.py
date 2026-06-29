@@ -235,6 +235,12 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
             if "umi" in self.task_name:
                 text_latents = language_goal
             else:
+                if language_goal is None:
+                    raise ValueError(
+                        f"{self.task_name} policy was trained with "
+                        f"language_emb_model={self.language_emb_model}, but eval did "
+                        "not provide a language_goal."
+                    )
                 print("predict_action language_goal: ", language_goal)
                 print(self.task_name, "max_length", self.max_length)
 
