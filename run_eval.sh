@@ -1,8 +1,8 @@
   #!/bin/bash
 
-  CHECKPOINT=/data2/local_userdata/huxianbin/outputs/checkpoints/uva_robocasa_pretrain300_joint_model/checkpoints/latest.ckpt
-  OUTPUT_DIR=/data2/local_userdata/huxianbin/outputs/eval/uva_robocasa_pretrain300_joint_model/formal
-  LOG_DIR=/data2/local_userdata/huxianbin/outputs/eval/uva_robocasa_pretrain300_joint_model/logs
+  CHECKPOINT=/data2/local_userdata/huxianbin/outputs/checkpoints/uva_robocasav0.2_jointmodel/checkpoints/latest.ckpt
+  OUTPUT_DIR=/data2/local_userdata/huxianbin/outputs/eval/uva_robocasav0.2_jointmodel/formal
+  LOG_DIR=/data2/local_userdata/huxianbin/outputs/eval/uva_robocasav0.2_jointmodel/logs
   CONTROLLER_CONFIGS_PATH=/home/huxianbin/unified_video_action/unified_video_action/config/robocasa_controller_configs.pkl
   NUM_TRIALS_PER_TASK=50
   SEEDS=195,196,197
