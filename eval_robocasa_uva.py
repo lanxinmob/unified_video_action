@@ -5,6 +5,7 @@ import os
 import pickle
 import time
 from collections import deque
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,81 @@ def parse_seeds(seed_arg):
 def load_controller_configs(path):
     with open(path, "rb") as f:
         return pickle.load(f)
+
+
+def to_plain_container(value):
+    if is_dataclass(value):
+        return to_plain_container(asdict(value))
+    if isinstance(value, dict):
+        return {k: to_plain_container(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_plain_container(v) for v in value]
+    return value
+
+
+def find_nested_key(value, key):
+    if isinstance(value, dict):
+        if key in value:
+            return value[key]
+        for child in value.values():
+            result = find_nested_key(child, key)
+            if result is not None:
+                return result
+    elif isinstance(value, list):
+        for child in value:
+            result = find_nested_key(child, key)
+            if result is not None:
+                return result
+    return None
+
+
+def merge_registry_task_kwargs(task_name, env_kwargs):
+    try:
+        from robosuite.environments import ALL_ENVIRONMENTS
+    except Exception:
+        ALL_ENVIRONMENTS = set()
+
+    if task_name in ALL_ENVIRONMENTS:
+        return env_kwargs
+
+    try:
+        from robocasa.utils.dataset_registry import (
+            MULTI_STAGE_TASK_DATASETS,
+            SINGLE_STAGE_TASK_DATASETS,
+        )
+    except Exception as exc:
+        print(f"Could not import RoboCasa dataset registry: {exc}")
+        return env_kwargs
+
+    task_registry = {}
+    task_registry.update(to_plain_container(SINGLE_STAGE_TASK_DATASETS))
+    task_registry.update(to_plain_container(MULTI_STAGE_TASK_DATASETS))
+    task_spec = task_registry.get(task_name)
+    if task_spec is None:
+        print(
+            f"Task alias '{task_name}' not found in RoboCasa dataset registry; "
+            "falling back to env_name=task_name."
+        )
+        return env_kwargs
+
+    task_spec = to_plain_container(task_spec)
+    registry_env_meta = find_nested_key(task_spec, "env_meta") or {}
+    registry_env_kwargs = find_nested_key(task_spec, "env_kwargs") or {}
+    registry_env_name = (
+        find_nested_key(task_spec, "env_name")
+        or find_nested_key(registry_env_meta, "env_name")
+        or task_name
+    )
+
+    resolved = {}
+    if isinstance(registry_env_meta, dict):
+        resolved.update(registry_env_meta.get("env_kwargs", {}))
+    if isinstance(registry_env_kwargs, dict):
+        resolved.update(registry_env_kwargs)
+    resolved.update(env_kwargs)
+    resolved["env_name"] = registry_env_name
+    print(f"Resolved RoboCasa task alias '{task_name}' -> env_name='{registry_env_name}'")
+    return resolved
 
 
 def parse_layout_and_style_ids(layout_and_style_ids, episode_idx):
@@ -100,6 +176,7 @@ def create_robocasa_env(args, task_name, seed, episode_idx):
         ),
         "translucent_robot": False,
     }
+    env_kwargs = merge_registry_task_kwargs(task_name, env_kwargs)
     log_env_kwargs = dict(env_kwargs)
     log_env_kwargs["controller_configs"] = args.controller_configs_path
     return robosuite.make(**env_kwargs), log_env_kwargs
