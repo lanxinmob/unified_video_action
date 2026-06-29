@@ -5,6 +5,7 @@ import os
 import pickle
 import time
 from collections import deque
+from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
@@ -150,7 +151,36 @@ def parse_layout_and_style_ids(layout_and_style_ids, episode_idx):
     return (all_layout_style_ids[scene_index],)
 
 
-def create_robocasa_env(args, task_name, seed, episode_idx):
+def cfg_to_plain(value):
+    try:
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(value):
+            return OmegaConf.to_container(value, resolve=True)
+    except Exception:
+        pass
+    return to_plain_container(value)
+
+
+def get_cfg_env_kwargs(cfg):
+    try:
+        env_kwargs = cfg.task.env_runner.get("env_kwargs", None)
+    except Exception:
+        return {}
+    if env_kwargs is None:
+        return {}
+    env_kwargs = cfg_to_plain(env_kwargs)
+    return deepcopy(env_kwargs) if isinstance(env_kwargs, dict) else {}
+
+
+def get_cfg_env_value(cfg, key, default=None):
+    try:
+        return cfg.task.env_runner.get(key, default)
+    except Exception:
+        return default
+
+
+def create_robocasa_env(cfg, args, task_name, seed, episode_idx):
     import robosuite
 
     try:
@@ -158,9 +188,9 @@ def create_robocasa_env(args, task_name, seed, episode_idx):
     except Exception:
         pass
 
-    env_kwargs = {
+    env_kwargs = get_cfg_env_kwargs(cfg)
+    env_kwargs.update({
         "env_name": task_name,
-        "robots": args.robots,
         "controller_configs": load_controller_configs(args.controller_configs_path),
         "camera_names": [
             "robot0_agentview_left",
@@ -171,20 +201,33 @@ def create_robocasa_env(args, task_name, seed, episode_idx):
         "camera_heights": args.env_img_res,
         "camera_depths": False,
         "use_camera_obs": True,
-        "use_object_obs": False,
         "has_renderer": False,
         "has_offscreen_renderer": True,
         "ignore_done": True,
-        "reward_shaping": True,
         "seed": seed,
-        "obj_instance_split": args.obj_instance_split,
-        "generative_textures": None,
-        "randomize_cameras": args.randomize_cameras,
-        "layout_and_style_ids": parse_layout_and_style_ids(
+    })
+    if args.robots is not None:
+        env_kwargs["robots"] = args.robots
+    else:
+        env_kwargs.setdefault("robots", "PandaMobile")
+    if args.obj_instance_split is not None:
+        env_kwargs["obj_instance_split"] = args.obj_instance_split
+    else:
+        env_kwargs.setdefault("obj_instance_split", "test")
+    if args.layout_and_style_ids is not None:
+        env_kwargs["layout_and_style_ids"] = parse_layout_and_style_ids(
             args.layout_and_style_ids, episode_idx
-        ),
-        "translucent_robot": False,
-    }
+        )
+    else:
+        env_kwargs.setdefault("layout_and_style_ids", None)
+    if args.randomize_cameras:
+        env_kwargs["randomize_cameras"] = True
+    else:
+        env_kwargs.setdefault("randomize_cameras", False)
+    env_kwargs.setdefault("use_object_obs", True)
+    env_kwargs.setdefault("reward_shaping", False)
+    env_kwargs.setdefault("generative_textures", None)
+    env_kwargs.setdefault("translucent_robot", False)
     env_kwargs = merge_registry_task_kwargs(task_name, env_kwargs)
     log_env_kwargs = dict(env_kwargs)
     log_env_kwargs["controller_configs"] = args.controller_configs_path
@@ -350,7 +393,7 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
     import torch
 
     env_seed = int(base_seed * episode_idx * 256)
-    env, env_kwargs = create_robocasa_env(args, task_name, env_seed, episode_idx)
+    env, env_kwargs = create_robocasa_env(cfg, args, task_name, env_seed, episode_idx)
     start_time = time.time()
 
     try:
@@ -371,7 +414,10 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
             obs_window.append(first_frame)
 
         env_action_dim = get_env_action_dim(env)
-        max_steps = TASK_MAX_STEPS.get(task_name, args.default_max_steps)
+        if args.default_max_steps is None:
+            max_steps = int(get_cfg_env_value(cfg, "max_steps", 500))
+        else:
+            max_steps = TASK_MAX_STEPS.get(task_name, args.default_max_steps)
         success = False
         num_steps = 0
 
@@ -382,7 +428,12 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
                     obs_dict=obs_dict, language_goal=language_goal
                 )
                 action_chunk = prediction["action"][0].detach().cpu().numpy()
-                chunk_len = min(args.num_open_loop_steps, len(action_chunk))
+                num_open_loop_steps = args.num_open_loop_steps
+                if num_open_loop_steps is None:
+                    num_open_loop_steps = int(
+                        get_cfg_env_value(cfg, "n_action_steps", len(action_chunk))
+                    )
+                chunk_len = min(num_open_loop_steps, len(action_chunk))
 
                 for action_idx in range(chunk_len):
                     action = adjust_action_dim(action_chunk[action_idx], env_action_dim)
@@ -493,16 +544,16 @@ def parse_args():
     parser.add_argument("--seeds", default="195,196,197")
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_id", type=int, default=0)
-    parser.add_argument("--robots", default="PandaMobile")
+    parser.add_argument("--robots", default=None)
     parser.add_argument("--controller_configs_path", default="robocasa_controller_configs.pkl")
     parser.add_argument("--env_img_res", type=int, default=224)
-    parser.add_argument("--layout_and_style_ids", default="((1,1),(2,2),(4,4),(6,9),(7,10))")
-    parser.add_argument("--obj_instance_split", default="B")
+    parser.add_argument("--layout_and_style_ids", default=None)
+    parser.add_argument("--obj_instance_split", default=None)
     parser.add_argument("--randomize_cameras", action="store_true")
     parser.add_argument("--num_wait_steps", type=int, default=10)
-    parser.add_argument("--num_open_loop_steps", type=int, default=8)
+    parser.add_argument("--num_open_loop_steps", type=int, default=None)
     parser.add_argument("--n_obs_steps", type=int, default=None)
-    parser.add_argument("--default_max_steps", type=int, default=500)
+    parser.add_argument("--default_max_steps", type=int, default=None)
     return parser.parse_args()
 
 
