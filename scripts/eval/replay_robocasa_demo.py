@@ -72,6 +72,19 @@ def infer_task_name(hdf5_file, demo):
     return None
 
 
+def load_dataset_env_kwargs(hdf5_file):
+    env_args = get_attr_json(hdf5_file["data"].attrs, "env_args")
+    if not isinstance(env_args, dict):
+        return {}
+    env_kwargs = env_args.get("env_kwargs") or {}
+    if not isinstance(env_kwargs, dict):
+        env_kwargs = {}
+    env_kwargs = dict(env_kwargs)
+    if env_args.get("env_name") and not env_kwargs.get("env_name"):
+        env_kwargs["env_name"] = env_args["env_name"]
+    return env_kwargs
+
+
 def get_initial_state(demo):
     if "states" not in demo or demo["states"].shape[0] == 0:
         return None
@@ -96,7 +109,7 @@ def set_env_state(env, state):
     return False
 
 
-def make_env(args, task_name):
+def make_env(args, task_name, dataset_env_kwargs=None):
     import robosuite
 
     try:
@@ -104,9 +117,9 @@ def make_env(args, task_name):
     except Exception:
         pass
 
-    env_kwargs = {
+    env_kwargs = dict(dataset_env_kwargs or {})
+    env_kwargs.update({
         "env_name": task_name,
-        "robots": args.robots,
         "controller_configs": load_controller_configs(args.controller_configs_path),
         "camera_names": [
             "robot0_agentview_left",
@@ -121,16 +134,25 @@ def make_env(args, task_name):
         "has_renderer": args.render,
         "has_offscreen_renderer": True,
         "ignore_done": True,
-        "reward_shaping": False,
         "seed": args.seed,
-        "obj_instance_split": args.obj_instance_split,
-        "layout_and_style_ids": maybe_literal(args.layout_and_style_ids),
-        "generative_textures": None,
-        "randomize_cameras": args.randomize_cameras,
-        "translucent_robot": False,
-        "clutter_mode": args.clutter_mode,
         "control_freq": args.control_freq,
-    }
+    })
+    env_kwargs.setdefault("robots", args.robots)
+    env_kwargs.setdefault("use_camera_obs", True)
+    env_kwargs.setdefault("use_object_obs", True)
+    env_kwargs.setdefault("reward_shaping", False)
+    env_kwargs.setdefault("generative_textures", None)
+    env_kwargs.setdefault("translucent_robot", False)
+    if args.obj_instance_split is not None:
+        env_kwargs["obj_instance_split"] = args.obj_instance_split
+    if args.layout_and_style_ids is not None:
+        env_kwargs["layout_and_style_ids"] = maybe_literal(args.layout_and_style_ids)
+    if args.randomize_cameras:
+        env_kwargs["randomize_cameras"] = True
+    else:
+        env_kwargs.setdefault("randomize_cameras", False)
+    if args.clutter_mode is not None:
+        env_kwargs["clutter_mode"] = args.clutter_mode
     env_kwargs = {k: v for k, v in env_kwargs.items() if v is not None}
     env_kwargs = merge_registry_task_kwargs(task_name, env_kwargs)
     while True:
@@ -159,7 +181,7 @@ def main():
     parser.add_argument("--seed", type=int, default=1111111)
     parser.add_argument("--control_freq", type=int, default=20)
     parser.add_argument("--env_img_res", type=int, default=224)
-    parser.add_argument("--obj_instance_split", default="train")
+    parser.add_argument("--obj_instance_split", default=None)
     parser.add_argument("--layout_and_style_ids", default=None)
     parser.add_argument("--clutter_mode", type=int, default=None)
     parser.add_argument("--randomize_cameras", action="store_true")
@@ -183,10 +205,11 @@ def main():
         actions = np.asarray(demo["actions"][:], dtype=np.float32)
         states0 = get_initial_state(demo)
         task_name = args.task or infer_task_name(hdf5_file, demo)
+        dataset_env_kwargs = load_dataset_env_kwargs(hdf5_file)
         if task_name is None:
             raise ValueError("Could not infer task name. Pass --task explicitly.")
 
-    env, env_kwargs = make_env(args, task_name)
+    env, env_kwargs = make_env(args, task_name, dataset_env_kwargs)
     frames = []
     success = False
     steps = 0
