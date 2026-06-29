@@ -426,12 +426,15 @@ def _convert_robomimic_to_replay(
                     language,
                     padding="max_length",
                     max_length=seq_max_len,
-                    return_tensors="pt",
+                    truncation=True,
                 )
                 language_tokens_all.append(
-                    torch.cat(
-                        [tokens.input_ids.unsqueeze(1), tokens.attention_mask.unsqueeze(1)],
-                        dim=1,
+                    np.stack(
+                        [
+                            np.asarray(tokens["input_ids"], dtype=np.int64),
+                            np.asarray(tokens["attention_mask"], dtype=np.int64),
+                        ],
+                        axis=0,
                     )
                 )
         episode_ends = list()
@@ -464,9 +467,11 @@ def _convert_robomimic_to_replay(
                 this_data.append(demo[data_key][:].astype(np.float32))
                 if key == "action" and language_tokens_all is not None:
                     this_language_data.append(
-                        language_tokens_all[demo_idx].repeat(
-                            this_data[-1].shape[0], 1, 1
-                        ).numpy()
+                        np.repeat(
+                            language_tokens_all[demo_idx][None, ...],
+                            this_data[-1].shape[0],
+                            axis=0,
+                        )
                     )
             this_data = np.concatenate(this_data, axis=0)
             if key == "action":
