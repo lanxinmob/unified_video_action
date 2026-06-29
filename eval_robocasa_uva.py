@@ -253,10 +253,18 @@ def quat_to_axis_angle(quat):
     return (axis * angle).astype(np.float32)
 
 
+def orient_robosuite_image(value):
+    # robosuite camera observations are vertically flipped relative to normal RGB images.
+    if value.ndim == 3 and value.shape[0] in (1, 3) and value.shape[-1] not in (1, 3):
+        return value[:, ::-1, :].copy()
+    return value[::-1].copy()
+
+
 def image_to_chw_float(obs, key):
     value = np.asarray(obs[key])
     if value.ndim != 3:
         raise ValueError(f"Expected HWC image for '{key}', got shape {value.shape}")
+    value = orient_robosuite_image(value)
     if value.shape[0] in (1, 3) and value.shape[-1] not in (1, 3):
         chw = value
     else:
@@ -271,6 +279,7 @@ def image_to_hwc_uint8(obs, key):
     value = np.asarray(obs[key])
     if value.ndim != 3:
         raise ValueError(f"Expected image for '{key}', got shape {value.shape}")
+    value = orient_robosuite_image(value)
     if value.shape[0] in (1, 3) and value.shape[-1] not in (1, 3):
         value = np.moveaxis(value, 0, -1)
     if value.dtype != np.uint8:
