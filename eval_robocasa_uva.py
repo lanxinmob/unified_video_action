@@ -267,6 +267,45 @@ def image_to_chw_float(obs, key):
     return chw
 
 
+def image_to_hwc_uint8(obs, key):
+    value = np.asarray(obs[key])
+    if value.ndim != 3:
+        raise ValueError(f"Expected image for '{key}', got shape {value.shape}")
+    if value.shape[0] in (1, 3) and value.shape[-1] not in (1, 3):
+        value = np.moveaxis(value, 0, -1)
+    if value.dtype != np.uint8:
+        value = np.clip(value, 0.0, 1.0)
+        value = (value * 255).astype(np.uint8)
+    return value
+
+
+def build_video_frame(raw_obs):
+    frames = [
+        image_to_hwc_uint8(raw_obs, "robot0_agentview_left_image"),
+        image_to_hwc_uint8(raw_obs, "robot0_agentview_right_image"),
+        image_to_hwc_uint8(raw_obs, "robot0_eye_in_hand_image"),
+    ]
+    return np.concatenate(frames, axis=1)
+
+
+def safe_name(value):
+    return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(value))
+
+
+def write_video(path, frames, fps):
+    if not frames:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import imageio.v2 as imageio
+    except Exception:
+        import imageio
+    with imageio.get_writer(str(path), fps=fps) as writer:
+        for frame in frames:
+            writer.append_data(frame)
+    return str(path)
+
+
 def build_frame_obs(raw_obs):
     return {
         "robot0_agentview_left_rgb": image_to_chw_float(
@@ -395,6 +434,8 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
     env_seed = int(base_seed * episode_idx * 256)
     env, env_kwargs = create_robocasa_env(cfg, args, task_name, env_seed, episode_idx)
     start_time = time.time()
+    video_frames = []
+    video_path = None
 
     try:
         raw_obs = env.reset()
@@ -403,6 +444,9 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
         dummy = zero_action(env)
         for _ in range(args.num_wait_steps):
             raw_obs, _, _, _ = env.step(dummy)
+
+        if args.save_video:
+            video_frames.append(build_video_frame(raw_obs))
 
         if hasattr(policy, "reset"):
             policy.reset()
@@ -439,6 +483,8 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
                     action = adjust_action_dim(action_chunk[action_idx], env_action_dim)
                     raw_obs, _, done, info = env.step(action)
                     num_steps += 1
+                    if args.save_video and (num_steps % args.video_stride == 0):
+                        video_frames.append(build_video_frame(raw_obs))
                     obs_window.append(build_frame_obs(raw_obs))
 
                     success = check_success(env, info)
@@ -447,6 +493,14 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
 
                 if success:
                     break
+
+        if args.save_video:
+            video_dir = Path(args.video_dir) if args.video_dir else Path(args.output_dir) / "videos"
+            video_name = (
+                f"{safe_name(task_name)}_seed{base_seed}_ep{episode_idx:03d}_"
+                f"success{int(success)}.mp4"
+            )
+            video_path = write_video(video_dir / video_name, video_frames, args.video_fps)
 
         return {
             "task": task_name,
@@ -458,6 +512,7 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
             "elapsed_sec": time.time() - start_time,
             "language_goal": language_goal,
             "env_kwargs": env_kwargs,
+            "video_path": video_path,
         }
     finally:
         if hasattr(env, "close"):
@@ -554,6 +609,10 @@ def parse_args():
     parser.add_argument("--num_open_loop_steps", type=int, default=None)
     parser.add_argument("--n_obs_steps", type=int, default=None)
     parser.add_argument("--default_max_steps", type=int, default=None)
+    parser.add_argument("--save_video", action="store_true")
+    parser.add_argument("--video_dir", default=None)
+    parser.add_argument("--video_fps", type=int, default=10)
+    parser.add_argument("--video_stride", type=int, default=1)
     return parser.parse_args()
 
 
