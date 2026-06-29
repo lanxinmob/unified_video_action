@@ -35,6 +35,15 @@ def load_controller_configs(path):
         return pickle.load(f)
 
 
+def resolve_repo_path(path):
+    if path is None:
+        return None
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = REPO_ROOT / resolved
+    return str(resolved)
+
+
 def maybe_literal(value):
     if value is None:
         return None
@@ -91,22 +100,54 @@ def get_initial_state(demo):
     return np.asarray(demo["states"][0])
 
 
-def set_env_state(env, state):
+def get_model_xml(demo):
+    for key in ("model_file", "model_xml"):
+        if key not in demo.attrs:
+            continue
+        value = demo.attrs[key]
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        return value
+    return None
+
+
+def get_env_target(env):
+    return env.env if hasattr(env, "env") else env
+
+
+def refresh_observation(env, fallback):
+    for target in (env, get_env_target(env)):
+        get_obs = getattr(target, "_get_observations", None)
+        if get_obs is None:
+            continue
+        try:
+            return get_obs()
+        except TypeError:
+            return get_obs(force_update=True)
+    return fallback
+
+
+def restore_demo_state(env, state, model_xml=None):
     if state is None:
-        return False
-    target = env.env if hasattr(env, "env") else env
+        return False, False
+    target = get_env_target(env)
     sim = getattr(target, "sim", None)
     if sim is None:
-        return False
+        return False, False
+    model_restored = False
+    if model_xml is not None and hasattr(target, "reset_from_xml_string"):
+        target.reset_from_xml_string(model_xml)
+        sim = getattr(target, "sim", sim)
+        model_restored = True
     if hasattr(sim, "set_state_from_flattened"):
         sim.set_state_from_flattened(state)
         sim.forward()
-        return True
+        return True, model_restored
     if hasattr(sim, "set_state"):
         sim.set_state(state)
         sim.forward()
-        return True
-    return False
+        return True, model_restored
+    return False, model_restored
 
 
 def make_env(args, task_name, dataset_env_kwargs=None):
@@ -120,7 +161,6 @@ def make_env(args, task_name, dataset_env_kwargs=None):
     env_kwargs = dict(dataset_env_kwargs or {})
     env_kwargs.update({
         "env_name": task_name,
-        "controller_configs": load_controller_configs(args.controller_configs_path),
         "camera_names": [
             "robot0_agentview_left",
             "robot0_agentview_right",
@@ -137,6 +177,13 @@ def make_env(args, task_name, dataset_env_kwargs=None):
         "seed": args.seed,
         "control_freq": args.control_freq,
     })
+    controller_source = "dataset"
+    if args.controller_configs_path is not None:
+        env_kwargs["controller_configs"] = load_controller_configs(args.controller_configs_path)
+        controller_source = f"cli:{args.controller_configs_path}"
+    elif env_kwargs.get("controller_configs") is None:
+        env_kwargs["controller_configs"] = load_controller_configs(args.fallback_controller_configs_path)
+        controller_source = f"fallback:{args.fallback_controller_configs_path}"
     env_kwargs.setdefault("robots", args.robots)
     env_kwargs.setdefault("use_camera_obs", True)
     env_kwargs.setdefault("use_object_obs", True)
@@ -157,7 +204,7 @@ def make_env(args, task_name, dataset_env_kwargs=None):
     env_kwargs = merge_registry_task_kwargs(task_name, env_kwargs)
     while True:
         try:
-            return robosuite.make(**env_kwargs), env_kwargs
+            return robosuite.make(**env_kwargs), env_kwargs, controller_source
         except TypeError as exc:
             match = re.search(r"unexpected keyword argument '([^']+)'", str(exc))
             if match is None:
@@ -176,7 +223,8 @@ def main():
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--demo", default="demo_0")
     parser.add_argument("--task", default=None)
-    parser.add_argument("--controller_configs_path", default="unified_video_action/config/robocasa_controller_configs.pkl")
+    parser.add_argument("--controller_configs_path", default=None)
+    parser.add_argument("--fallback_controller_configs_path", default="unified_video_action/config/robocasa_controller_configs.pkl")
     parser.add_argument("--robots", default="PandaMobile")
     parser.add_argument("--seed", type=int, default=1111111)
     parser.add_argument("--control_freq", type=int, default=20)
@@ -195,27 +243,27 @@ def main():
 
     dataset_path = Path(args.dataset)
     demo_key = parse_demo_key(args.demo)
-    controller_path = Path(args.controller_configs_path)
-    if not controller_path.is_absolute():
-        controller_path = REPO_ROOT / controller_path
-    args.controller_configs_path = str(controller_path)
+    args.controller_configs_path = resolve_repo_path(args.controller_configs_path)
+    args.fallback_controller_configs_path = resolve_repo_path(args.fallback_controller_configs_path)
 
     with h5py.File(dataset_path, "r") as hdf5_file:
         demo = hdf5_file[f"data/{demo_key}"]
         actions = np.asarray(demo["actions"][:], dtype=np.float32)
         states0 = get_initial_state(demo)
+        model_xml = get_model_xml(demo)
         task_name = args.task or infer_task_name(hdf5_file, demo)
         dataset_env_kwargs = load_dataset_env_kwargs(hdf5_file)
         if task_name is None:
             raise ValueError("Could not infer task name. Pass --task explicitly.")
 
-    env, env_kwargs = make_env(args, task_name, dataset_env_kwargs)
+    env, env_kwargs, controller_source = make_env(args, task_name, dataset_env_kwargs)
     frames = []
     success = False
     steps = 0
     try:
         obs = env.reset()
-        state_set = set_env_state(env, states0)
+        state_set, model_restored = restore_demo_state(env, states0, model_xml)
+        obs = refresh_observation(env, obs)
         env_action_dim = get_env_action_dim(env)
         if actions.shape[-1] != env_action_dim:
             raise ValueError(
@@ -228,9 +276,10 @@ def main():
         print(f"actions_shape={actions.shape}")
         print(f"env_action_dim={env_action_dim}")
         print(f"state_restored={state_set}")
+        print(f"model_xml_restored={model_restored}")
         print(f"control_freq={env_kwargs.get('control_freq')}")
         print(f"robots={env_kwargs.get('robots')}")
-        print(f"controller={args.controller_configs_path}")
+        print(f"controller_source={controller_source}")
 
         max_steps = len(actions) if args.max_steps is None else min(args.max_steps, len(actions))
         if args.save_video:
