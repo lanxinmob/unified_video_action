@@ -87,23 +87,32 @@ def merge_registry_task_kwargs(task_name, env_kwargs):
     if task_name in ALL_ENVIRONMENTS:
         return env_kwargs
 
+    task_registry = {}
     try:
-        from robocasa.utils.dataset_registry import (
-            MULTI_STAGE_TASK_DATASETS,
-            SINGLE_STAGE_TASK_DATASETS,
-        )
+        import robocasa.utils.dataset_registry as dataset_registry
     except Exception as exc:
         print(f"Could not import RoboCasa dataset registry: {exc}")
         return env_kwargs
 
-    task_registry = {}
-    task_registry.update(to_plain_container(SINGLE_STAGE_TASK_DATASETS))
-    task_registry.update(to_plain_container(MULTI_STAGE_TASK_DATASETS))
+    for name in dir(dataset_registry):
+        if name.endswith("TASK_DATASETS"):
+            registry_value = getattr(dataset_registry, name)
+            if isinstance(registry_value, dict):
+                task_registry.update(to_plain_container(registry_value))
+
+    if len(task_registry) == 0:
+        print(
+            "RoboCasa dataset registry imported, but no '*TASK_DATASETS' dicts "
+            "were found."
+        )
+        return env_kwargs
+
     task_spec = task_registry.get(task_name)
     if task_spec is None:
+        available = ", ".join(sorted(task_registry.keys())[:50])
         print(
             f"Task alias '{task_name}' not found in RoboCasa dataset registry; "
-            "falling back to env_name=task_name."
+            f"available registry keys start with: {available}"
         )
         return env_kwargs
 
@@ -338,6 +347,8 @@ def check_success(env, info):
 
 
 def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
+    import torch
+
     env_seed = int(base_seed * episode_idx * 256)
     env, env_kwargs = create_robocasa_env(args, task_name, env_seed, episode_idx)
     start_time = time.time()
