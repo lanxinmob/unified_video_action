@@ -133,7 +133,7 @@ class MAR(nn.Module):
                 )
             elif "robocasa" in self.task_name:
                 self.proprioception_proj_cond = nn.Linear(
-                    8, encoder_embed_dim, bias=True
+                    15, encoder_embed_dim, bias=True
                 )
             else:
                 self.proprioception_proj_cond = nn.Linear(
@@ -345,7 +345,7 @@ class MAR(nn.Module):
                     )
             elif "robocasa" in self.task_name:
                 self.diffproploss = DiffActLoss(
-                    target_channels=8,
+                    target_channels=15,
                     z_channels=decoder_embed_dim,
                     width=diffloss_act_w,
                     depth=diffloss_act_d,
@@ -549,6 +549,7 @@ class MAR(nn.Module):
                             proprioception_input["robot0_eef_pos"],
                             proprioception_input["robot0_eef_ori"],
                             proprioception_input["robot0_gripper_states"],
+                            proprioception_input["robot0_joint_states"],
                         ],
                         dim=-1,
                     )
@@ -827,6 +828,7 @@ class MAR(nn.Module):
                         proprioception_input["robot0_eef_pos_pred"],
                         proprioception_input["robot0_eef_ori_pred"],
                         proprioception_input["robot0_gripper_states_pred"],
+                        proprioception_input["robot0_joint_states_pred"],
                     ],
                     dim=-1,
                 )

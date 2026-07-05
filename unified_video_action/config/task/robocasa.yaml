@@ -17,6 +17,9 @@ shape_meta: &shape_meta
     gripper_states:
       shape:
       - 2
+    joint_states:
+      shape:
+      - 7
     robot0_agentview_left_rgb:
       shape:
       - 3
@@ -54,6 +57,9 @@ shape_meta_env: &shape_meta_env
     gripper_states:
       shape:
       - 2
+    joint_states:
+      shape:
+      - 7
     robot0_agentview_left_rgb:
       shape:
       - 3

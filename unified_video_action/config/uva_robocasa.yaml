@@ -5,6 +5,11 @@ defaults:
   - task: robocasa
   - model: uva
 
+model:
+  policy:
+    use_proprioception: true
+    predict_proprioception: false
+
 dataloader:
   batch_size: 32
   num_workers: 8

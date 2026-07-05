@@ -298,6 +298,8 @@ def process_data(batch, task_name="", eval=False, **kwargs):
             wrist_image = wrist_image.to(device)
             wrist_image = rearrange(wrist_image / 127.5 - 1, "b t c h w -> b c t h w")
 
+            predict_proprioception = kwargs.get("predict_proprioception", False)
+
             if train:
                 wrist_image, wrist_image_2 = torch.chunk(wrist_image, 2, dim=2)
                 robot0_eef_pos, robot0_eef_pos_pred = torch.chunk(
@@ -369,6 +371,9 @@ def process_data(batch, task_name="", eval=False, **kwargs):
                 robot0_gripper_states, robot0_gripper_states_pred = torch.chunk(
                     batch["obs"]["gripper_states"], 2, dim=1
                 )
+                robot0_joint_states, robot0_joint_states_pred = torch.chunk(
+                    batch["obs"]["joint_states"], 2, dim=1
+                )
             else:
                 wrist_image = wrist_image
                 wrist_image_2 = None
@@ -376,9 +381,11 @@ def process_data(batch, task_name="", eval=False, **kwargs):
                 robot0_eef_pos = batch["obs"]["ee_pos"]
                 robot0_eef_ori = batch["obs"]["ee_ori"]
                 robot0_gripper_states = batch["obs"]["gripper_states"]
+                robot0_joint_states = batch["obs"]["joint_states"]
                 robot0_eef_pos_pred = None
                 robot0_eef_ori_pred = None
                 robot0_gripper_states_pred = None
+                robot0_joint_states_pred = None
 
             if kwargs["different_history_freq"]:
                 if train:
@@ -389,22 +396,33 @@ def process_data(batch, task_name="", eval=False, **kwargs):
                     robot0_gripper_states = robot0_gripper_states[
                         :, indices[: indices.shape[0] // 2]
                     ]
+                    robot0_joint_states = robot0_joint_states[
+                        :, indices[: indices.shape[0] // 2]
+                    ]
                 else:
                     robot0_eef_pos = robot0_eef_pos[:, indices]
                     robot0_eef_ori = robot0_eef_ori[:, indices]
                     robot0_gripper_states = robot0_gripper_states[:, indices]
+                    robot0_joint_states = robot0_joint_states[:, indices]
 
             proprioception_input = {
                 "robot0_eef_pos": robot0_eef_pos,
                 "robot0_eef_ori": robot0_eef_ori,
                 "robot0_gripper_states": robot0_gripper_states,
+                "robot0_joint_states": robot0_joint_states,
                 "second_image": wrist_image,
                 "third_image": right_image,
                 "pred_second_image": wrist_image_2,
-                "robot0_eef_pos_pred": robot0_eef_pos_pred,
-                "robot0_eef_ori_pred": robot0_eef_ori_pred,
-                "robot0_gripper_states_pred": robot0_gripper_states_pred,
             }
+            if predict_proprioception:
+                proprioception_input.update(
+                    {
+                        "robot0_eef_pos_pred": robot0_eef_pos_pred,
+                        "robot0_eef_ori_pred": robot0_eef_ori_pred,
+                        "robot0_gripper_states_pred": robot0_gripper_states_pred,
+                        "robot0_joint_states_pred": robot0_joint_states_pred,
+                    }
+                )
 
         elif "pusht" in task_name:
             if train:

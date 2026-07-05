@@ -330,6 +330,7 @@ def build_frame_obs(raw_obs):
         "ee_pos": np.asarray(raw_obs["robot0_eef_pos"], dtype=np.float32),
         "ee_ori": quat_to_axis_angle(raw_obs["robot0_eef_quat"]),
         "gripper_states": np.asarray(raw_obs["robot0_gripper_qpos"], dtype=np.float32),
+        "joint_states": np.asarray(raw_obs["joint_states"], dtype=np.float32),
     }
 
 
