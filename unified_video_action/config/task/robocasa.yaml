@@ -37,8 +37,7 @@ shape_meta: &shape_meta
       type: rgb
     language:
       shape:
-      - 2
-      - 30
+      - 768
 
 shape_meta_env: &shape_meta_env
   image_resolution: 224
