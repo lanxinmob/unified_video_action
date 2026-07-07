@@ -291,6 +291,8 @@ def process_data(batch, task_name="", eval=False, **kwargs):
     x = rearrange(x / 127.5 - 1, "b t c h w -> b c t h w")
 
     if kwargs["use_proprioception"]:
+        predict_proprioception = kwargs.get("predict_proprioception", False)
+
         if "toolhang" in task_name:
             wrist_image = batch["obs"]["wrist_image"]
             wrist_image = wrist_image * 255.0
@@ -298,7 +300,6 @@ def process_data(batch, task_name="", eval=False, **kwargs):
             wrist_image = wrist_image.to(device)
             wrist_image = rearrange(wrist_image / 127.5 - 1, "b t c h w -> b c t h w")
 
-            predict_proprioception = kwargs.get("predict_proprioception", False)
 
             if train:
                 wrist_image, wrist_image_2 = torch.chunk(wrist_image, 2, dim=2)
