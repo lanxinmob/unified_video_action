@@ -31,7 +31,15 @@ from unified_video_action.utils.language_model import extract_text_features
 
 
 def prepare_data_predict_action(
-    cfg, x, actions, model, T, device, language_goal=None, eval=False
+    cfg,
+    x,
+    actions,
+    model,
+    T,
+    device,
+    language_goal=None,
+    language_latents=None,
+    eval=False,
 ):
     ## normalize actions and observations
     nactions = normalize_action(
@@ -66,26 +74,37 @@ def prepare_data_predict_action(
     if cfg.task.dataset.language_emb_model is not None:
         if "umi" in cfg.task.name:
             text_latents = language_goal
-        elif "libero" in cfg.task.name:
-            if cfg.task.dataset.language_emb_model == "clip":
-                text_tokens = {
-                    "input_ids": language_goal[:, 0].long()[:, 0],
-                    "attention_mask": language_goal[:, 0].long()[:, 1],
-                }
-                text_latents = extract_text_features(
-                    model.text_model,
-                    text_tokens,
-                    language_emb_model=cfg.task.dataset.language_emb_model,
+        elif language_latents is not None:
+            text_latents = language_latents
+        elif cfg.task.dataset.language_emb_model == "clip":
+            if language_goal is None:
+                raise ValueError(
+                    f"{cfg.task.name} eval requires language tokens or "
+                    "language_latents when language conditioning is enabled."
                 )
-            elif cfg.task.dataset.language_emb_model == "flant5":
-                text_tokens = language_goal[:, 0].long()
-                text_latents = extract_text_features(
-                    model.text_model,
-                    text_tokens,
-                    language_emb_model=cfg.task.dataset.language_emb_model,
-                ).float()
-            else:
-                raise NotImplementedError
+            text_tokens = {
+                "input_ids": language_goal[:, 0].long()[:, 0],
+                "attention_mask": language_goal[:, 0].long()[:, 1],
+            }
+            text_latents = extract_text_features(
+                model.text_model,
+                text_tokens,
+                language_emb_model=cfg.task.dataset.language_emb_model,
+            )
+        elif cfg.task.dataset.language_emb_model == "flant5":
+            if language_goal is None:
+                raise ValueError(
+                    f"{cfg.task.name} eval requires language tokens or "
+                    "language_latents when language conditioning is enabled."
+                )
+            text_tokens = language_goal[:, 0].long()
+            text_latents = extract_text_features(
+                model.text_model,
+                text_tokens,
+                language_emb_model=cfg.task.dataset.language_emb_model,
+            ).float()
+        else:
+            raise NotImplementedError
     return (
         x,
         real,
@@ -136,17 +155,17 @@ def test_video_fvd(
             actions = actions[:k]
             x = dict_apply(x, lambda x: x[:k])
 
+            language_goal = None
+            language_latents = None
             if cfg.task.dataset.language_emb_model is not None:
                 if "language" in x["obs"]:
                     language_goal = x["obs"]["language"]
                     del x["obs"]["language"]
                 elif "language_latents" in x:
-                    language_goal = x["language_latents"]
+                    language_latents = x["language_latents"]
                     del x["language_latents"]
                 else:
                     raise NotImplementedError
-            else:
-                language_goal = None
 
             (
                 x,
@@ -158,7 +177,14 @@ def test_video_fvd(
                 trajectory,
                 proprioception_input,
             ) = prepare_data_predict_action(
-                cfg, x, actions, model, T, device, language_goal=language_goal
+                cfg,
+                x,
+                actions,
+                model,
+                T,
+                device,
+                language_goal=language_goal,
+                language_latents=language_latents,
             )
 
             z, act_out = model.model.sample_tokens(
@@ -271,17 +297,17 @@ def test_action_l2(
 
             B, T, C, H, W = x["obs"]["image"].size()
 
+            language_goal = None
+            language_latents = None
             if cfg.task.dataset.language_emb_model is not None:
                 if "language" in x["obs"]:
                     language_goal = x["obs"]["language"]
                     del x["obs"]["language"]
                 elif "language_latents" in x:
-                    language_goal = x["language_latents"]
+                    language_latents = x["language_latents"]
                     del x["language_latents"]
                 else:
                     raise NotImplementedError
-            else:
-                language_goal = None
 
             (
                 x,
@@ -293,7 +319,14 @@ def test_action_l2(
                 trajectory,
                 proprioception_input,
             ) = prepare_data_predict_action(
-                cfg, x, actions, model, T, device, language_goal=language_goal
+                cfg,
+                x,
+                actions,
+                model,
+                T,
+                device,
+                language_goal=language_goal,
+                language_latents=language_latents,
             )
 
             z, act_out = model.model.sample_tokens(
@@ -338,3 +371,4 @@ def test_action_l2(
         )
 
     return log_data
+

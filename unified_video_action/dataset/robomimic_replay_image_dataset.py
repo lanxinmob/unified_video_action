@@ -68,11 +68,21 @@ def _get_demo_language(demo, hdf5_path, demo_key):
         for key in ("lang", "language", "language_instruction", "task_description"):
             value = ep_meta.get(key)
             if value:
-                return str(value)
+                language = str(value)
+                print(
+                    f"[language-read] {hdf5_path}:{demo_key} "
+                    f"ep_meta.{key}={language}"
+                )
+                return language
     for key in ("lang", "language", "language_instruction", "task_description"):
         value = demo.attrs.get(key)
         if value:
-            return str(_decode_hdf5_attr(value))
+            language = str(_decode_hdf5_attr(value))
+            print(
+                f"[language-read] {hdf5_path}:{demo_key} "
+                f"demo.attrs.{key}={language}"
+            )
+            return language
     raise RuntimeError(
         f"Missing language instruction for {hdf5_path}:{demo_key}. "
         "Expected demo attrs or demo.attrs['ep_meta'] to contain one of: "
