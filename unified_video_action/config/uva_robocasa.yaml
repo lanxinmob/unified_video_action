@@ -12,7 +12,7 @@ model:
 
 dataloader:
   batch_size: 32
-  num_workers: 8
+  num_workers: 4
   persistent_workers: true
   pin_memory: true
   shuffle: true
