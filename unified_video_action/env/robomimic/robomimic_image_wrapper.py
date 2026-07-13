@@ -53,6 +53,7 @@ class RobomimicImageWrapper(gym.Env):
             "ee_pos": "robot0_eef_pos",
             "ee_ori": "robot0_eef_quat",
             "gripper_states": "robot0_gripper_qpos",
+            "joint_states": "robot0_joint_pos",
         }
         return robocasa_key_map.get(key, key)
 

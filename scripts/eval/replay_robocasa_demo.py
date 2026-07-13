@@ -192,6 +192,97 @@ def restore_demo_state(env, state, model_xml=None):
     return False, model_restored
 
 
+def inspect_hdf5_observations(hdf5_file, demo, demo_key):
+    obs = demo["obs"]
+    print(f"root_keys={list(hdf5_file.keys())}")
+    print_json("data_attrs", dict(hdf5_file["data"].attrs))
+    print(f"demo={demo_key}")
+    print(f"obs_keys={sorted(obs.keys())}")
+
+    keys = (
+        "ee_pos",
+        "ee_ori",
+        "gripper_states",
+        "joint_states",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot0_joint_pos",
+    )
+    for key in keys:
+        if key not in obs:
+            print(f"{key}: MISSING")
+            continue
+        value = np.asarray(obs[key])
+        print(
+            f"{key}: shape={value.shape} dtype={value.dtype} "
+            f"first={value[0]} min={value.min(axis=0)} max={value.max(axis=0)}"
+        )
+
+
+def compare_ee_ori_conventions(env, states, ee_ori, model_xml, max_frames):
+    from scipy.spatial.transform import Rotation as Rotation
+
+    count = min(len(states), len(ee_ori))
+    if count == 0:
+        raise ValueError("No overlapping HDF5 states and ee_ori frames to compare.")
+    if max_frames is not None and max_frames > 0 and count > max_frames:
+        frame_indices = np.linspace(0, count - 1, max_frames, dtype=np.int64)
+    else:
+        frame_indices = np.arange(count, dtype=np.int64)
+
+    xyzw_errors = []
+    wxyz_errors = []
+    model_xml_restored = False
+    for comparison_idx, frame_idx in enumerate(frame_indices):
+        state_set, restored = restore_demo_state(
+            env,
+            states[frame_idx],
+            model_xml if comparison_idx == 0 else None,
+        )
+        model_xml_restored = model_xml_restored or restored
+        if not state_set:
+            raise RuntimeError(f"Could not restore HDF5 state at frame {frame_idx}.")
+
+        raw_obs = refresh_observation(env, {})
+        if "robot0_eef_quat" not in raw_obs:
+            raise KeyError(
+                "robot0_eef_quat is missing from replay observation; "
+                f"available keys: {sorted(raw_obs.keys())}"
+            )
+
+        quat_raw = np.asarray(raw_obs["robot0_eef_quat"], dtype=np.float64)
+        hdf_rot = Rotation.from_rotvec(
+            np.asarray(ee_ori[frame_idx], dtype=np.float64)
+        )
+        xyzw_rot = Rotation.from_quat(quat_raw)
+        wxyz_rot = Rotation.from_quat(
+            np.asarray([quat_raw[1], quat_raw[2], quat_raw[3], quat_raw[0]])
+        )
+        xyzw_error = float((hdf_rot.inv() * xyzw_rot).magnitude())
+        wxyz_error = float((hdf_rot.inv() * wxyz_rot).magnitude())
+        xyzw_errors.append(xyzw_error)
+        wxyz_errors.append(wxyz_error)
+        print(
+            f"frame={frame_idx} hdf_ee_ori={ee_ori[frame_idx]} "
+            f"raw_quat={quat_raw} xyzw_error_rad={xyzw_error:.8f} "
+            f"wxyz_error_rad={wxyz_error:.8f}"
+        )
+
+    xyzw_errors = np.asarray(xyzw_errors)
+    wxyz_errors = np.asarray(wxyz_errors)
+    print(f"model_xml_restored={model_xml_restored}")
+    print(
+        "xyzw_summary: "
+        f"mean_rad={xyzw_errors.mean():.8f} max_rad={xyzw_errors.max():.8f} "
+        f"mean_deg={np.rad2deg(xyzw_errors.mean()):.6f}"
+    )
+    print(
+        "wxyz_summary: "
+        f"mean_rad={wxyz_errors.mean():.8f} max_rad={wxyz_errors.max():.8f} "
+        f"mean_deg={np.rad2deg(wxyz_errors.mean()):.6f}"
+    )
+
+
 def make_env(args, task_name, dataset_env_kwargs=None):
     import robosuite
 
@@ -288,6 +379,9 @@ def main():
     parser.add_argument("--video_fps", type=int, default=20)
     parser.add_argument("--video_stride", type=int, default=1)
     parser.add_argument("--dump_env_args", action="store_true")
+    parser.add_argument("--inspect_hdf5_obs", action="store_true")
+    parser.add_argument("--compare_ee_ori", action="store_true")
+    parser.add_argument("--compare_frames", type=int, default=32)
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset)
@@ -297,7 +391,16 @@ def main():
 
     with h5py.File(dataset_path, "r") as hdf5_file:
         demo = hdf5_file[f"data/{demo_key}"]
+        if args.inspect_hdf5_obs:
+            inspect_hdf5_observations(hdf5_file, demo, demo_key)
+            return
         actions = np.asarray(demo["actions"][:], dtype=np.float32)
+        states = np.asarray(demo["states"][:]) if "states" in demo else None
+        ee_ori = (
+            np.asarray(demo["obs/ee_ori"][:], dtype=np.float64)
+            if "obs/ee_ori" in demo
+            else None
+        )
         states0 = get_initial_state(demo)
         model_xml = get_model_xml(hdf5_file, demo)
         dataset_env_args = load_dataset_env_args(hdf5_file)
@@ -314,6 +417,19 @@ def main():
         obs = env.reset()
         state_set, model_restored = restore_demo_state(env, states0, model_xml)
         obs = refresh_observation(env, obs)
+        if args.compare_ee_ori:
+            if states is None:
+                raise KeyError(f"data/{demo_key}/states is missing from the HDF5 file.")
+            if ee_ori is None:
+                raise KeyError(f"data/{demo_key}/obs/ee_ori is missing from the HDF5 file.")
+            compare_ee_ori_conventions(
+                env,
+                states,
+                ee_ori,
+                model_xml,
+                args.compare_frames,
+            )
+            return
         env_action_dim = get_env_action_dim(env)
         if actions.shape[-1] != env_action_dim:
             raise ValueError(

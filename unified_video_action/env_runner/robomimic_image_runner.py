@@ -233,8 +233,15 @@ class RobomimicImageRunner(BaseImageRunner):
         # is needed to initialize spaces.
         def dummy_env_fn():
             if use_robocasa_env:
+                # AsyncVectorEnv only uses this environment to read the
+                # observation and action spaces. Keep RoboCasa from creating an
+                # offscreen OpenGL context in the parent process before the
+                # rendering worker is forked.
+                dummy_env_kwargs = dict(env_meta["env_kwargs"])
+                dummy_env_kwargs["has_offscreen_renderer"] = False
+                dummy_env_kwargs["use_camera_obs"] = False
                 robomimic_env = create_robocasa_env(
-                    env_meta["env_kwargs"],
+                    dummy_env_kwargs,
                     shape_meta=shape_meta,
                     controller_configs_path=controller_configs_path,
                 )

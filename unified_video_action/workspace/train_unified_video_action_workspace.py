@@ -193,11 +193,14 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
         # configure env
+        env_runners = None
         if (
-            cfg.model.policy.action_model_params.predict_action
+            accelerator.is_main_process
+            and cfg.model.policy.action_model_params.predict_action
             and "env_runner" in cfg.task
         ):
             env_runners = load_env_runner(cfg, self.output_dir)
+        accelerator.wait_for_everyone()
 
         # configure checkpoint
         topk_manager = TopKCheckpointManager(

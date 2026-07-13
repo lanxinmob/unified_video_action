@@ -330,7 +330,7 @@ def build_frame_obs(raw_obs):
         "ee_pos": np.asarray(raw_obs["robot0_eef_pos"], dtype=np.float32),
         "ee_ori": quat_to_axis_angle(raw_obs["robot0_eef_quat"]),
         "gripper_states": np.asarray(raw_obs["robot0_gripper_qpos"], dtype=np.float32),
-        "joint_states": np.asarray(raw_obs["joint_states"], dtype=np.float32),
+        "joint_states": np.asarray(raw_obs["robot0_joint_pos"], dtype=np.float32),
     }
 
 
@@ -461,6 +461,31 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
 
     try:
         raw_obs = env.reset()
+
+        expected = {
+            "robot0_eef_pos": (3,),
+            "robot0_eef_quat": (4,),
+            "robot0_gripper_qpos": (2,),
+            "robot0_joint_pos": (7,),
+        }
+
+        print("\n===== RoboCasa raw observation schema =====")
+        print(sorted(raw_obs.keys()))
+
+        for key, expected_shape in expected.items():
+            if key not in raw_obs:
+                raise KeyError(
+                    f"Missing {key}. Available keys: {sorted(raw_obs.keys())}"
+                )
+
+            value = np.asarray(raw_obs[key])
+            print(
+                f"{key}: shape={value.shape}, "
+                f"dtype={value.dtype}, value={value}"
+            )
+            assert value.shape == expected_shape, (
+                f"{key}: expected {expected_shape}, got {value.shape}"
+            )
         language_goal = get_language_goal(env)
 
         dummy = zero_action(env)
