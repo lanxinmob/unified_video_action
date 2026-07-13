@@ -352,6 +352,7 @@ class RobomimicImageRunner(BaseImageRunner):
         self.rotation_transformer = rotation_transformer
         self.abs_action = abs_action
         self.tqdm_interval_sec = tqdm_interval_sec
+        self.use_robocasa_env = use_robocasa_env
 
     def run(self, policy: BaseImagePolicy, **kwargs):
         device = policy.device
@@ -385,6 +386,24 @@ class RobomimicImageRunner(BaseImageRunner):
 
             # start rollout
             obs = env.reset()
+            predict_kwargs = dict(kwargs)
+            if (
+                self.use_robocasa_env
+                and getattr(policy, "language_emb_model", None) is not None
+                and "language_goal" not in predict_kwargs
+            ):
+                language_goals = list(env.call("get_language_goal"))
+                missing_language = [
+                    idx for idx, goal in enumerate(language_goals) if not goal
+                ]
+                if missing_language:
+                    raise RuntimeError(
+                        "RoboCasa rollout environments did not provide a language "
+                        f"goal at indices {missing_language}. Expected get_ep_meta() "
+                        "to contain one of: lang, language, language_instruction, "
+                        "task_description."
+                    )
+                predict_kwargs["language_goal"] = language_goals
             # past_action = None
             past_action_list = []
             policy.reset()
@@ -416,7 +435,7 @@ class RobomimicImageRunner(BaseImageRunner):
 
                 # run policy
                 with torch.no_grad():
-                    action_dict = policy.predict_action(obs_dict, **kwargs)
+                    action_dict = policy.predict_action(obs_dict, **predict_kwargs)
 
                 # device_transfer
                 np_action_dict = dict_apply(

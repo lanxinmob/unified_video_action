@@ -105,6 +105,23 @@ class RobomimicImageWrapper(gym.Env):
             obs[key] = self._format_obs_value(key, raw_obs[raw_key], space.shape)
         return obs
 
+    def get_language_goal(self):
+        """Return the current RoboCasa episode instruction, if available."""
+        if not hasattr(self.env, "get_ep_meta"):
+            return None
+
+        ep_meta = self.env.get_ep_meta()
+        if not isinstance(ep_meta, dict):
+            return None
+
+        for key in ("lang", "language", "language_instruction", "task_description"):
+            value = ep_meta.get(key)
+            if value:
+                if isinstance(value, bytes):
+                    value = value.decode("utf-8")
+                return str(value)
+        return None
+
     def seed(self, seed=None):
         np.random.seed(seed=seed)
         self._seed = seed
