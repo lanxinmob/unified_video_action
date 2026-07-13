@@ -186,7 +186,7 @@ class AsyncVectorEnv(VectorEnv):
         _, successes = zip(*[pipe.recv() for pipe in self.parent_pipes])
         self._raise_if_errors(successes)
 
-    def reset_async(self):
+    def reset_async(self, seed=None, options=None):
         self._assert_is_running()
         if self._state != AsyncState.DEFAULT:
             raise AlreadyPendingCallError(
@@ -195,11 +195,22 @@ class AsyncVectorEnv(VectorEnv):
                 self._state.value,
             )
 
+        # Gym >= 0.26 always forwards seed and options from VectorEnv.reset.
+        # The wrapped RoboCasa environments still expose the legacy
+        # seed(...), reset() API, so apply a requested seed separately and keep
+        # the worker reset message unchanged.
+        if seed is not None:
+            self.seed(seed)
+        if options is not None:
+            raise NotImplementedError(
+                "Reset options are not supported by the legacy environment API."
+            )
+
         for pipe in self.parent_pipes:
             pipe.send(("reset", None))
         self._state = AsyncState.WAITING_RESET
 
-    def reset_wait(self, timeout=None):
+    def reset_wait(self, timeout=None, seed=None, options=None):
         """
         Parameters
         ----------
@@ -211,6 +222,9 @@ class AsyncVectorEnv(VectorEnv):
         observations : sample from `observation_space`
             A batch of observations from the vectorized environment.
         """
+        # Gym >= 0.26 forwards these arguments to reset_wait as well. They were
+        # already handled by reset_async and are intentionally ignored here.
+        del seed, options
         self._assert_is_running()
         if self._state != AsyncState.WAITING_RESET:
             raise NoAsyncCallError(
