@@ -383,10 +383,19 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
                     new_key = key.replace("/", "_")
                     metric_dict[new_key] = value
 
-                # save topk checkpoints
-                topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
-                if topk_ckpt_path is not None:
-                    self.save_checkpoint(path=topk_ckpt_path)
+                # Save a top-k checkpoint only when its monitor was evaluated
+                # in this epoch. For example, test_mean_score is unavailable
+                # between simulator rollout epochs.
+                monitor_key = cfg.checkpoint.topk.monitor_key
+                if monitor_key in metric_dict:
+                    topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
+                    if topk_ckpt_path is not None:
+                        self.save_checkpoint(path=topk_ckpt_path)
+                else:
+                    accelerator.print(
+                        f"Skipping top-k checkpoint at epoch {self.epoch}: "
+                        f"monitor metric '{monitor_key}' was not evaluated."
+                    )
 
                 # recover the DDP model
                 self.model = model_ddp
