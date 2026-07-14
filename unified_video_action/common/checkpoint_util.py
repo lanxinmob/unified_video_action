@@ -33,28 +33,32 @@ class TopKCheckpointManager:
             self.path_value_map[ckpt_path] = value
             return ckpt_path
 
-        # at capacity
-        sorted_map = sorted(self.path_value_map.items(), key=lambda x: x[1])
-        min_path, min_value = sorted_map[0]
-        max_path, max_value = sorted_map[-1]
-
-        delete_path = None
+        # At capacity, replace the oldest checkpoint among the worst-scoring
+        # entries. Equal scores are eligible for replacement so ties retain the
+        # most recently evaluated checkpoints.
         if self.mode == "max":
-            if value > min_value:
-                delete_path = min_path
+            worst_value = min(self.path_value_map.values())
+            should_replace = value >= worst_value
         else:
-            if value < max_value:
-                delete_path = max_path
+            worst_value = max(self.path_value_map.values())
+            should_replace = value <= worst_value
 
-        if delete_path is None:
+        if not should_replace:
             return None
-        else:
-            del self.path_value_map[delete_path]
-            self.path_value_map[ckpt_path] = value
 
-            if not os.path.exists(self.save_dir):
-                os.mkdir(self.save_dir)
+        # Dictionaries preserve insertion order, so this selects the oldest
+        # entry when multiple checkpoints share the same worst score.
+        delete_path = next(
+            path
+            for path, current_value in self.path_value_map.items()
+            if current_value == worst_value
+        )
+        del self.path_value_map[delete_path]
+        self.path_value_map[ckpt_path] = value
 
-            if os.path.exists(delete_path):
-                os.remove(delete_path)
-            return ckpt_path
+        if not os.path.exists(self.save_dir):
+            os.mkdir(self.save_dir)
+
+        if os.path.exists(delete_path):
+            os.remove(delete_path)
+        return ckpt_path
