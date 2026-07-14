@@ -55,6 +55,8 @@ def env_rollout(cfg, env_runners, policy):
         runner_log = env_runner.run(policy)
         step_log.update(runner_log)
 
-        step_log["train_mean_score"] = runner_log["train/mean_score"]
-        step_log["test_mean_score"] = runner_log["test/mean_score"]
+        for split in ("train", "test"):
+            split_key = f"{split}/mean_score"
+            if split_key in runner_log:
+                step_log[f"{split}_mean_score"] = runner_log[split_key]
     return step_log
