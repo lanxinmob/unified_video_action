@@ -59,14 +59,38 @@ class RobomimicImageWrapper(gym.Env):
 
     @staticmethod
     def _quat_to_axis_angle(quat):
-        quat = np.asarray(quat, dtype=np.float32)
-        quat = quat / np.maximum(np.linalg.norm(quat, axis=-1, keepdims=True), 1e-8)
-        w = np.clip(quat[..., 0], -1.0, 1.0)
-        xyz = quat[..., 1:]
-        sin_half = np.linalg.norm(xyz, axis=-1, keepdims=True)
-        angle = 2.0 * np.arctan2(sin_half[..., 0], w)
-        axis = xyz / np.maximum(sin_half, 1e-8)
-        return axis * angle[..., None]
+        """Convert RoboSuite quaternion(s), ordered XYZW, to axis-angle.
+
+        Use RoboSuite's own transform utility so rollout preprocessing exactly
+        matches datasets generated with ``T.quat2axisangle``. In particular,
+        ``robot0_eef_quat`` is *not* WXYZ.
+        """
+        import robosuite.utils.transform_utils as T
+
+        quat = np.asarray(quat, dtype=np.float64)
+        if quat.shape[-1] != 4:
+            raise ValueError(
+                f"Expected RoboSuite XYZW quaternion with shape (..., 4), "
+                f"got {quat.shape}"
+            )
+
+        flat_quat = quat.reshape(-1, 4)
+        flat_axis_angle = []
+        for q in flat_quat:
+            norm = np.linalg.norm(q)
+            if norm < 1e-8:
+                flat_axis_angle.append(np.zeros(3, dtype=np.float32))
+                continue
+
+            # quat2axisangle clips q[3] in place, so pass a private copy.
+            q_xyzw = (q / norm).copy()
+            flat_axis_angle.append(
+                T.quat2axisangle(q_xyzw).astype(np.float32)
+            )
+
+        return np.stack(flat_axis_angle, axis=0).reshape(
+            quat.shape[:-1] + (3,)
+        )
 
     @staticmethod
     def _format_obs_value(key, value, target_shape):
@@ -173,5 +197,3 @@ class RobomimicImageWrapper(gym.Env):
         img = np.moveaxis(self.render_cache, 0, -1)
         img = (img * 255).astype(np.uint8)
         return img
-
-

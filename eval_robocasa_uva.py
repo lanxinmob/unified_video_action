@@ -236,22 +236,26 @@ def create_robocasa_env(cfg, args, task_name, seed, episode_idx):
 
 
 def quat_to_axis_angle(quat):
-    quat = np.asarray(quat, dtype=np.float32)
+    """Convert RoboSuite ``robot0_eef_quat`` (XYZW) to axis-angle.
+
+    Matching RoboSuite's own conversion is important because the HDF5
+    ``obs/ee_ori`` field is already stored as a 3-D axis-angle vector.
+    """
+    import robosuite.utils.transform_utils as T
+
+    quat = np.asarray(quat, dtype=np.float64)
+    if quat.shape != (4,):
+        raise ValueError(
+            f"Expected RoboSuite XYZW quaternion with shape (4,), got {quat.shape}"
+        )
+
     norm = np.linalg.norm(quat)
     if norm < 1e-8:
         return np.zeros(3, dtype=np.float32)
-    quat = quat / norm
 
-    if quat[0] < 0:
-        quat = -quat
-
-    sin_theta = np.linalg.norm(quat[1:])
-    if sin_theta < 1e-8:
-        return np.zeros(3, dtype=np.float32)
-
-    axis = quat[1:] / sin_theta
-    angle = 2.0 * np.arctan2(sin_theta, quat[0])
-    return (axis * angle).astype(np.float32)
+    # quat2axisangle clips q[3] in place, so pass a private copy.
+    quat_xyzw = (quat / norm).copy()
+    return T.quat2axisangle(quat_xyzw).astype(np.float32)
 
 
 def orient_robosuite_image(value):
