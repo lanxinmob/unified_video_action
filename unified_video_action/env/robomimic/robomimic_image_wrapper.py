@@ -95,26 +95,40 @@ class RobomimicImageWrapper(gym.Env):
     @staticmethod
     def _format_obs_value(key, value, target_shape):
         value = np.asarray(value)
+
         if key.endswith("_rgb"):
+            # Raw RoboSuite images are vertically flipped.
+            value = value[::-1].copy()
+
             if value.ndim == 3 and value.shape[-1] == 3:
                 value = np.moveaxis(value, -1, 0)
+
             if value.dtype == np.uint8:
                 value = value.astype(np.float32) / 255.0
             else:
                 value = value.astype(np.float32)
+
         elif key == "ee_ori" and value.shape[-1] == 4 and target_shape[-1] == 3:
             value = RobomimicImageWrapper._quat_to_axis_angle(value)
+
         else:
             value = value.astype(np.float32)
+
         return value
 
     @staticmethod
     def _format_render_image(value):
         value = np.asarray(value)
+
+        # Raw RoboSuite images are vertically flipped.
+        value = value[::-1].copy()
+
         if value.ndim == 3 and value.shape[-1] == 3:
             value = np.moveaxis(value, -1, 0)
+
         if value.dtype == np.uint8:
             value = value.astype(np.float32) / 255.0
+
         return value
 
     def get_observation(self, raw_obs=None):
