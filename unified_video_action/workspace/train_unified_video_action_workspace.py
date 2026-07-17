@@ -280,28 +280,45 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
 
                     # logging
                     raw_loss_cpu = raw_loss.item()
+                    loss_diffusion_cpu = loss_diffusion.item()
+                    loss_action_cpu = loss_action.item()
 
                     tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
                     train_losses.append(raw_loss_cpu)
 
-                    if cfg.model.policy.autoregressive_model_params.predict_video:
-                        loss_diffusion_cpu = loss_diffusion.item()
-                    else:
-                        loss_diffusion_cpu = 0.0
-
-                    if cfg.model.policy.action_model_params.predict_action:
-                        loss_action_cpu = loss_action.item()
-                    else:
-                        loss_action_cpu = 0.0
+                    unwrapped_model = accelerator.unwrap_model(self.model)
+                    selected_mode = getattr(
+                        unwrapped_model,
+                        "last_selected_mode",
+                        "unknown",
+                    )
 
                     step_log = {
                         "train_loss": raw_loss_cpu,
-                        "diffusion_loss": loss_diffusion_cpu,
-                        "action_loss": loss_action_cpu,
                         "global_step": self.global_step,
                         "epoch": self.epoch,
                         "lr": self.lr_scheduler.get_last_lr()[0],
+
+                        f"mode_loss/{selected_mode}": raw_loss_cpu,
                     }
+
+                    video_modes = {
+                        "video_model",
+                        "dynamic_model",
+                        "full_dynamic_model",
+                    }
+
+                    action_modes = {
+                        "policy_model",
+                        "inverse_model",
+                        "full_dynamic_model",
+                    }
+
+                    if selected_mode in video_modes:
+                        step_log["diffusion_loss_active"] = loss_diffusion_cpu
+                        
+                    if selected_mode in action_modes:
+                        step_log["action_loss_active"] = loss_action_cpu
 
                     is_last_batch = batch_idx == (len(train_dataloader) - 1)
                     if not is_last_batch:
@@ -339,7 +356,7 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
                 # ========= evaluate val action error =========
                 if (
                     cfg.model.policy.action_model_params.predict_action
-                    and "env_runner" not in cfg.task
+                    #and "env_runner" not in cfg.task
                 ):
                     ## if has similartor, skip this
                     act_log = test_action_l2(

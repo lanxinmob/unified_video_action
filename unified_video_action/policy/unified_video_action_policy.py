@@ -417,7 +417,8 @@ class UnifiedVideoActionPolicy(BaseImagePolicy):
         )
 
         selected_mode = random.choice(self.task_modes)
-
+        self.last_selected_mode = selected_mode
+        
         loss, video_loss, act_loss = self.model(
             z,
             c,

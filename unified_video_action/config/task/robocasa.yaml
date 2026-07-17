@@ -1,6 +1,6 @@
 name: robocasa
 task_type: single_dataset
-task_modes: []
+task_modes: ["policy_model", "full_dynamic_model"]
 
 shape_meta: &shape_meta
   image_resolution: 224
