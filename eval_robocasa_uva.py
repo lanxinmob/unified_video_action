@@ -479,7 +479,74 @@ def load_policy(checkpoint_path, output_dir, device):
 
     workspace_cls = hydra.utils.get_class(cfg.model._target_)
     workspace = workspace_cls(cfg, output_dir=output_dir)
-    workspace.load_payload(payload)
+ 
+    def expand_legacy_proprio_weights(payload, workspace):
+        """
+        Convert legacy RoboCasa proprio projection:
+            8D = ee_pos(3) + ee_ori(3) + gripper(2)
+
+        into current:
+            15D = old 8D + joint_states(7)
+
+        The seven new columns are initialized to zero, so the checkpoint
+        initially behaves exactly like the legacy model.
+        """
+
+        for state_name in ("model", "ema_model"):
+            if state_name not in payload.get("state_dicts", {}):
+                continue
+
+            target_module = getattr(workspace, state_name, None)
+            if target_module is None:
+                continue
+
+            source_state = payload["state_dicts"][state_name]
+            target_state = target_module.state_dict()
+
+            for source_key in list(source_state.keys()):
+                clean_key = source_key.replace("module.", "")
+
+                if not clean_key.endswith(
+                    "model.proprioception_proj_cond.weight"
+                ):
+                    continue
+
+                if clean_key not in target_state:
+                    continue
+
+                old_weight = source_state[source_key]
+                target_weight = target_state[clean_key]
+
+                if (
+                    old_weight.ndim == 2
+                    and target_weight.ndim == 2
+                    and old_weight.shape[0] == target_weight.shape[0]
+                    and old_weight.shape[1] == 8
+                    and target_weight.shape[1] == 15
+                ):
+                    expanded_weight = torch.zeros(
+                        target_weight.shape,
+                        dtype=old_weight.dtype,
+                        device=old_weight.device,
+                    )
+
+                    expanded_weight[:, :8] = old_weight
+                    source_state[source_key] = expanded_weight
+
+                    print(
+                        f"Expanded legacy {state_name} proprio weight: "
+                        f"{tuple(old_weight.shape)} -> "
+                        f"{tuple(expanded_weight.shape)}"
+                    )
+
+
+    expand_legacy_proprio_weights(payload, workspace)
+
+    workspace.load_payload(
+        payload,
+        exclude_keys=("optimizer", "lr_scheduler"),
+    )
+
 
     use_ema = bool(cfg.training.get("use_ema", False))
     policy = workspace.ema_model if use_ema else workspace.model
