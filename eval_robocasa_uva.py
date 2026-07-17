@@ -48,6 +48,12 @@ def parse_seeds(seed_arg):
     return [int(seed_arg)]
 
 
+def parse_optional_seeds(seed_arg):
+    if seed_arg is None or str(seed_arg).strip() == "":
+        return None
+    return set(parse_seeds(seed_arg))
+
+
 def load_controller_configs(path):
     with open(path, "rb") as f:
         return pickle.load(f)
@@ -293,13 +299,36 @@ def image_to_hwc_uint8(obs, key):
     return value
 
 
-def build_video_frame(raw_obs):
+def _add_video_overlay(frame, lines):
+    if not lines:
+        return frame
+    try:
+        from PIL import Image, ImageDraw
+
+        image = Image.fromarray(frame)
+        draw = ImageDraw.Draw(image)
+        text = "\n".join(str(line) for line in lines)
+        try:
+            bbox = draw.multiline_textbbox((0, 0), text, spacing=2)
+            text_height = bbox[3] - bbox[1]
+        except AttributeError:
+            text_height = 12 * len(lines)
+        draw.rectangle((0, 0, image.width, text_height + 8), fill=(0, 0, 0))
+        draw.multiline_text((4, 4), text, fill=(255, 255, 255), spacing=2)
+        return np.asarray(image)
+    except Exception as exc:
+        print(f"Video overlay disabled for this frame: {exc}")
+        return frame
+
+
+def build_video_frame(raw_obs, overlay_lines=None):
     frames = [
         image_to_hwc_uint8(raw_obs, "robot0_agentview_left_image"),
         image_to_hwc_uint8(raw_obs, "robot0_agentview_right_image"),
         image_to_hwc_uint8(raw_obs, "robot0_eye_in_hand_image"),
     ]
-    return np.concatenate(frames, axis=1)
+    frame = np.concatenate(frames, axis=1)
+    return _add_video_overlay(frame, overlay_lines)
 
 
 def safe_name(value):
@@ -359,6 +388,21 @@ def get_env_action_dim(env):
             return int(np.asarray(spec[0]).shape[0])
         return int(np.asarray(spec).shape[0])
     raise AttributeError("Could not infer env action dimension")
+
+
+def get_action_layout(env):
+    try:
+        robot = env.robots[0]
+        controller = robot.composite_controller
+        if hasattr(controller, "get_action_info_dict"):
+            info = controller.get_action_info_dict()
+            return to_plain_container(info)
+        if hasattr(controller, "get_action_info"):
+            indices, dimensions = controller.get_action_info()
+            return {"indices": list(indices), "dimensions": list(dimensions)}
+    except Exception as exc:
+        return {"unavailable": str(exc)}
+    return None
 
 
 def zero_action(env):
@@ -454,14 +498,29 @@ def check_success(env, info):
     return False
 
 
-def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
+def run_episode(
+    policy,
+    cfg,
+    args,
+    task_name,
+    base_seed,
+    episode_idx,
+    device,
+    save_video=False,
+):
     import torch
 
-    env_seed = int(base_seed * episode_idx * 256)
+    # Collision-free deterministic seed. The previous multiplication made
+    # episode 0 use seed 0 for every base seed.
+    env_seed = int(
+        np.random.SeedSequence([int(base_seed), int(episode_idx)])
+        .generate_state(1, dtype=np.uint32)[0]
+    )
     env, env_kwargs = create_robocasa_env(cfg, args, task_name, env_seed, episode_idx)
     start_time = time.time()
     video_frames = []
     video_path = None
+    action_trace = []
 
     try:
         raw_obs = env.reset()
@@ -490,14 +549,38 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
             assert value.shape == expected_shape, (
                 f"{key}: expected {expected_shape}, got {value.shape}"
             )
+
         language_goal = get_language_goal(env)
+        if not language_goal:
+            raise RuntimeError(
+                "RoboCasa environment did not provide a language goal. "
+                "The checkpoint is language-conditioned, so evaluating without "
+                "the episode instruction would make the rollout invalid."
+            )
+        print(f"language_goal: {language_goal}")
+
+        action_layout = get_action_layout(env)
+        if episode_idx == 0:
+            print(f"RoboCasa action layout: {action_layout}")
 
         dummy = zero_action(env)
         for _ in range(args.num_wait_steps):
             raw_obs, _, _, _ = env.step(dummy)
 
-        if args.save_video:
-            video_frames.append(build_video_frame(raw_obs))
+        initial_eef_pos = np.asarray(raw_obs["robot0_eef_pos"], dtype=np.float64).copy()
+        final_eef_pos = initial_eef_pos.copy()
+
+        if save_video:
+            video_frames.append(
+                build_video_frame(
+                    raw_obs,
+                    [
+                        f"task={task_name} seed={base_seed} episode={episode_idx}",
+                        "step=0 success=0",
+                        f"language={language_goal}",
+                    ] if not args.no_video_overlay else None,
+                )
+            )
 
         if hasattr(policy, "reset"):
             policy.reset()
@@ -540,27 +623,75 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
 
                 for action_idx in range(chunk_len):
                     action = validate_action_dim(action_chunk[action_idx], env_action_dim)
+                    action_trace.append(action.copy())
                     raw_obs, _, done, info = env.step(action)
                     num_steps += 1
-                    if args.save_video and (num_steps % args.video_stride == 0):
-                        video_frames.append(build_video_frame(raw_obs))
+                    final_eef_pos = np.asarray(
+                        raw_obs["robot0_eef_pos"], dtype=np.float64
+                    ).copy()
+                    success = check_success(env, info)
+
+                    if save_video and (num_steps % args.video_stride == 0):
+                        action_text = np.array2string(
+                            action,
+                            precision=2,
+                            suppress_small=True,
+                            max_line_width=160,
+                        )
+                        video_frames.append(
+                            build_video_frame(
+                                raw_obs,
+                                [
+                                    f"task={task_name} seed={base_seed} episode={episode_idx}",
+                                    f"step={num_steps}/{max_steps} success={int(success)}",
+                                    f"action={action_text}",
+                                ] if not args.no_video_overlay else None,
+                            )
+                        )
                     obs_window.append(build_frame_obs(raw_obs))
 
-                    success = check_success(env, info)
+                    if (
+                        args.debug_action_every > 0
+                        and num_steps % args.debug_action_every == 0
+                    ):
+                        print(
+                            f"step={num_steps} action={np.array2string(action, precision=3)} "
+                            f"eef_pos={final_eef_pos} success={int(success)}"
+                        )
+
                     if success or done or num_steps >= max_steps:
                         break
 
                 if success:
                     break
 
-        if args.save_video:
-            video_dir = Path(args.video_dir) if args.video_dir else Path(args.output_dir) / "videos"
+        action_stats = None
+        if action_trace:
+            actions = np.stack(action_trace, axis=0)
+            action_stats = {
+                "mean": np.mean(actions, axis=0).tolist(),
+                "std": np.std(actions, axis=0).tolist(),
+                "min": np.min(actions, axis=0).tolist(),
+                "max": np.max(actions, axis=0).tolist(),
+                "mean_abs": np.mean(np.abs(actions), axis=0).tolist(),
+            }
+
+        if save_video:
+            video_dir = (
+                Path(args.video_dir)
+                if args.video_dir
+                else Path(args.output_dir) / "videos"
+            )
             video_name = (
                 f"{safe_name(task_name)}_seed{base_seed}_ep{episode_idx:03d}_"
                 f"success{int(success)}.mp4"
             )
-            video_path = write_video(video_dir / video_name, video_frames, args.video_fps)
+            video_path = write_video(
+                video_dir / video_name, video_frames, args.video_fps
+            )
+            print(f"Saved rollout video: {video_path}")
 
+        eef_delta = final_eef_pos - initial_eef_pos
         return {
             "task": task_name,
             "seed": base_seed,
@@ -571,6 +702,12 @@ def run_episode(policy, cfg, args, task_name, base_seed, episode_idx, device):
             "elapsed_sec": time.time() - start_time,
             "language_goal": language_goal,
             "env_kwargs": env_kwargs,
+            "action_layout": action_layout,
+            "action_stats": action_stats,
+            "initial_eef_pos": initial_eef_pos.tolist(),
+            "final_eef_pos": final_eef_pos.tolist(),
+            "eef_displacement": eef_delta.tolist(),
+            "eef_displacement_norm": float(np.linalg.norm(eef_delta)),
             "video_path": video_path,
         }
     finally:
@@ -655,6 +792,12 @@ def parse_args():
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--num_trials_per_task", type=int, default=50)
+    parser.add_argument(
+        "--tasks",
+        nargs="+",
+        default=None,
+        help="Optional task names. By default all 24 benchmark tasks are evaluated.",
+    )
     parser.add_argument("--seeds", default="195,196,197")
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_id", type=int, default=0)
@@ -673,6 +816,27 @@ def parse_args():
     parser.add_argument("--video_dir", default=None)
     parser.add_argument("--video_fps", type=int, default=10)
     parser.add_argument("--video_stride", type=int, default=1)
+    parser.add_argument(
+        "--video_seeds",
+        default=None,
+        help=(
+            "Optional comma-separated base seeds to record. "
+            "For example, --video_seeds 195 records only that seed."
+        ),
+    )
+    parser.add_argument(
+        "--num_videos_per_job",
+        type=int,
+        default=1,
+        help="Maximum recorded episodes for each task/seed job.",
+    )
+    parser.add_argument("--no_video_overlay", action="store_true")
+    parser.add_argument(
+        "--debug_action_every",
+        type=int,
+        default=0,
+        help="Print action and EEF position every N environment steps; 0 disables it.",
+    )
     return parser.parse_args()
 
 
@@ -687,8 +851,12 @@ def main():
 
     output_dir = Path(args.output_dir)
     device = torch.device(args.device)
-    tasks = ALL_TASKS
+    tasks = args.tasks if args.tasks is not None else ALL_TASKS
+    unknown_tasks = sorted(set(tasks) - set(ALL_TASKS))
+    if unknown_tasks:
+        raise ValueError(f"Unknown RoboCasa tasks: {unknown_tasks}")
     seeds = parse_seeds(args.seeds)
+    video_seeds = parse_optional_seeds(args.video_seeds)
     jobs = build_jobs(tasks, seeds, args.num_shards, args.shard_id)
 
     expected_trials = len(tasks) * len(seeds) * args.num_trials_per_task
@@ -703,6 +871,11 @@ def main():
         job_successes = []
         print(f"\nRunning task={task_name} seed={seed}")
         for episode_idx in range(args.num_trials_per_task):
+            save_this_video = (
+                args.save_video
+                and episode_idx < args.num_videos_per_job
+                and (video_seeds is None or seed in video_seeds)
+            )
             result = run_episode(
                 policy=policy,
                 cfg=cfg,
@@ -711,6 +884,7 @@ def main():
                 base_seed=seed,
                 episode_idx=episode_idx,
                 device=device,
+                save_video=save_this_video,
             )
             results.append(result)
             job_successes.append(int(result["success"]))
