@@ -391,18 +391,52 @@ def get_env_action_dim(env):
 
 
 def get_action_layout(env):
-    try:
-        robot = env.robots[0]
-        controller = robot.composite_controller
-        if hasattr(controller, "get_action_info_dict"):
-            info = controller.get_action_info_dict()
-            return to_plain_container(info)
-        if hasattr(controller, "get_action_info"):
-            indices, dimensions = controller.get_action_info()
-            return {"indices": list(indices), "dimensions": list(dimensions)}
-    except Exception as exc:
-        return {"unavailable": str(exc)}
-    return None
+    robot = env.robots[0]
+    controller = getattr(robot, "composite_controller", None)
+
+    result = {
+        "env_action_dim": getattr(env, "action_dim", None),
+        "robot_class": type(robot).__name__,
+        "controller_class": (
+            type(controller).__name__ if controller is not None else None
+        ),
+    }
+
+    if controller is None:
+        result["robot_attributes"] = [
+            name for name in dir(robot)
+            if "controller" in name.lower()
+        ]
+        return result
+
+    split = getattr(controller, "_action_split_indexes", None)
+    if split is not None:
+        result["split_indexes"] = {
+            str(k): [int(v[0]), int(v[1])]
+            for k, v in split.items()
+        }
+
+    parts = getattr(controller, "part_controllers", None)
+    if parts is not None:
+        result["part_controllers"] = {}
+        for name, part in parts.items():
+            result["part_controllers"][str(name)] = {
+                "class": type(part).__name__,
+                "control_dim": getattr(part, "control_dim", None),
+            }
+
+    config = getattr(robot, "part_controller_config", None)
+    if config is not None:
+        result["part_controller_config_keys"] = list(config.keys())
+
+    if hasattr(controller, "get_action_info_dict"):
+        result["action_info"] = controller.get_action_info_dict()
+    elif hasattr(controller, "get_action_info"):
+        indices, dimensions = controller.get_action_info()
+        result["indices"] = list(indices)
+        result["dimensions"] = list(dimensions)
+
+    return result
 
 
 def zero_action(env):
