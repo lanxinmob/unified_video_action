@@ -702,9 +702,10 @@ def run_episode(
                 "as the demonstrations used for training."
             )
         if args.default_max_steps is None:
-            max_steps = int(get_cfg_env_value(cfg, "max_steps", 500))
+            config_max_steps = int(get_cfg_env_value(cfg, "max_steps", 1000))
+            max_steps = TASK_MAX_STEPS.get(task_name, config_max_steps)
         else:
-            max_steps = TASK_MAX_STEPS.get(task_name, args.default_max_steps)
+            max_steps = args.default_max_steps
         success = False
         num_steps = 0
 
