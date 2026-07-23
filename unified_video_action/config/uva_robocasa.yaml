@@ -35,7 +35,7 @@ training:
   max_val_steps: null
   num_epochs: 3050
   resume: true
-  rollout_every: 10
+  rollout_every: 1
   sample_every: 5
   seed: 42
   tqdm_interval_sec: 1.0
@@ -44,6 +44,7 @@ training:
   mixed_precision: 'fp16'
 
 checkpoint:
+  save_every_epoch_ckpt: true
   topk:
     monitor_key: test_mean_score
     mode: max

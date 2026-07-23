@@ -380,9 +380,17 @@ class TrainUnifiedVideoActionWorkspace(BaseWorkspace):
             accelerator.wait_for_everyone()
 
             # ========= checkpoint =========
-            if (
-                self.epoch % cfg.training.checkpoint_every
-            ) == 0 and accelerator.is_main_process:
+            if cfg.checkpoint.get("save_every_epoch_ckpt", False):
+                epoch_ckpt_path = os.path.join(
+                    self.output_dir,
+                    "checkpoints",
+                    f"epoch={self.epoch:04d}.ckpt",
+                )
+                self.save_checkpoint(
+                    path=epoch_ckpt_path,
+                    use_thread=False,
+                )
+            if (self.epoch % cfg.training.checkpoint_every) == 0 and accelerator.is_main_process:
                 # unwrap the model to save ckpt
                 model_ddp = self.model
                 self.model = accelerator.unwrap_model(self.model)

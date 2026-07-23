@@ -114,7 +114,7 @@ env_runner:
   n_test: 50
   n_test_vis: 4
   test_start_seed: 100000
-  max_steps: 600
+  max_steps: 1000
   n_obs_steps: 16
   n_action_steps: 8
   render_obs_key: 'robot0_agentview_right_image'
