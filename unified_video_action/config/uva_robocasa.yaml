@@ -18,8 +18,8 @@ dataloader:
   shuffle: true
 
 val_dataloader:
-  batch_size: 32
-  num_workers: 8
+  batch_size: 4
+  num_workers: 4
   persistent_workers: true
   pin_memory: true
   shuffle: false
@@ -31,7 +31,7 @@ training:
   gradient_accumulate_every: 1
   lr_scheduler: cosine
   lr_warmup_steps: 8000
-  max_train_steps: 8000
+  max_train_steps: null
   max_val_steps: null
   num_epochs: 3050
   resume: true

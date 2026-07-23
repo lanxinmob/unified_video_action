@@ -111,7 +111,7 @@ env_runner:
   n_train: 0
   n_train_vis: 1
   train_start_idx: 0
-  n_test: 50
+  n_test: 20
   n_test_vis: 4
   test_start_seed: 100000
   max_steps: 1000
@@ -123,7 +123,7 @@ env_runner:
   past_action: false
   #abs_action: *abs_action
   tqdm_interval_sec: 1.0
-  n_envs: 1
+  n_envs: 2
   env_kwargs:
     robots: PandaMobile
     seed: 1111111
